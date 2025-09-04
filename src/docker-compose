@@ -1,0 +1,490 @@
+#!/bin/sh
+# Copyright 2025 Northern.tech AS
+#
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
+
+# This Mender Update Module was derived from the Application Update Module at
+# https://github.com/mendersoftware/app-update-module.
+
+set -e
+
+STATE="$1"
+FILES="$2"
+TEMP_DIR="$FILES"/tmp
+
+TAR_CMD="tar"
+XDELTA3_CMD="xdelta3"
+DOCKER_CMD="docker"
+DOCKER_COMPOSE_CMD=""
+
+CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
+PERSISTENT_STORE="/data/mender-docker-compose"
+
+if test -f "$CONFIG_FILE"; then
+    . "$CONFIG_FILE"
+fi
+
+cleanup() {
+    set +e
+    if test -f "$PERSISTENT_STORE"/.rw_test; then
+        rm -f "$PERSISTENT_STORE"/.rw_test
+    fi
+}
+trap cleanup 1 2 3 6 15
+
+if test -d "$PERSISTENT_STORE"; then
+    if touch "$PERSISTENT_STORE"/.rw_test; then
+        rm -f "$PERSISTENT_STORE"/.rw_test
+    else
+        echo "ERROR: cant write to persistent_store in $PERSISTENT_STORE"
+        exit 1
+    fi
+fi
+
+parse_metadata() {
+    # $1 -- meta-data JSON file
+    # $2 -- header-info JSON file
+
+    application_name=$(jq -r .application_name < "$1")
+    platform=$(jq -r .platform < "$1")
+    version=$(jq -r .version < "$1")
+    artifact_name=$(jq -r .artifact_provides.artifact_name < "$2")
+
+    if test "${application_name}" = ""; then
+        echo "ERROR: application_name is required. Exiting."
+        return 1
+    fi
+
+    if test "${platform}" = ""; then
+        echo "ERROR: platform is required. Exiting."
+        return 1
+    fi
+
+    if test "${version}" = ""; then
+        echo "ERROR: version is required. Exiting."
+        return 1
+    elif test "${version}" != "1"; then
+        echo "ERROR: only version 1 is supported, not version ${version}. Exiting."
+        return 1
+    fi
+
+    if test "${artifact_name}" = ""; then
+        echo "ERROR: artifact_name is required. Exiting."
+        return 1
+    fi
+}
+
+discover_docker_compose() {
+    local rc=0
+    local compose_version
+    if test -n "$DOCKER_COMPOSE_CMD"; then
+        $DOCKER_COMPOSE_CMD version < /dev/null > /dev/null 2>&1
+        rc=$?
+    elif $DOCKER_CMD compose version < /dev/null > /dev/null 2>&1; then
+        DOCKER_COMPOSE_CMD="$DOCKER_CMD compose"
+    elif docker-compose version < /dev/null > /dev/null 2>&1; then
+        DOCKER_COMPOSE_CMD="docker-compose"
+    else
+        echo "ERROR: could not find executable for Docker Compose" 1>&2
+        echo "ERROR: is Docker Compose installed?" 1>&2
+        rc=1
+    fi
+    if test $rc -eq 0; then
+        compose_version=$($DOCKER_COMPOSE_CMD version --short)
+        case "$compose_version" in
+            "2."*)  ;;
+            *)
+                echo "Docker Compose v2 is required; installed version: ${compose_version}"
+                rc=1
+                ;;
+        esac
+    fi
+    return $rc
+}
+
+assert_requirements() {
+    # TODO: xdelta3, sha256sum
+    if ! "$TAR_CMD" --version < /dev/null > /dev/null 2>&1; then
+        echo "ERROR: $TAR_CMD is required. Exiting."
+        return 1
+    fi
+    if ! $DOCKER_CMD --version > /dev/null < /dev/null 2>&1; then
+        echo "ERROR: cannot find command \"${DOCKER_CMD}\" in PATH"
+        echo "ERROR: is Docker installed?"
+        return 1
+    fi
+    if ! $DOCKER_CMD version > /dev/null; then
+        echo "ERROR: failed to connect with the Docker API"
+        return 1
+    fi
+    discover_docker_compose || return 1
+
+    return 0
+}
+
+container_image_save() {
+    local application_name="$1" # TODO
+    local url="$2"
+    local output_file="$3"
+
+    $DOCKER_CMD image save "$url" -o "$output_file"
+}
+
+unpack_image() {
+    local input_file="$1"
+    local image_dir="$2"
+
+    if test -d "${image_dir}"; then
+        rm -Rf "${image_dir}"
+    fi
+    mkdir -p "${image_dir}"
+    tar xvf "$input_file" -C "${image_dir}"
+}
+
+# given a checksum and a directory find matching layer.tar
+# be careful what you echo to stdout from this function:
+# it prints the path to a layer
+find_layer_by_sum() {
+    local sum="$1"
+    local dir="$2"
+    local file_list
+
+    if test "$sum" = ""; then
+        return 1
+    fi
+    file_list=$(mktemp)
+    find "$dir" -name layer.tar -exec sha256sum {} \; > "${file_list}"
+    cat "$file_list" | sed -ne "/^${sum}/s/^${sum}[ ]*//p"
+    rm -f "${file_list}"
+}
+
+# given current and new image directories and the binary delta of a layer
+# apply and save the layer.tar in the new image dir
+apply_layer_delta() {
+    local current_image_dir="$1"
+    local new_image_dir="$2"
+    local vcdiff="$3"
+    local current_sum_file
+    local new_sum_file
+    local current_sum
+    local new_sum
+    local output_layer
+    local current_layer_tar
+    local new_layer_tar
+
+    current_sum_file=$(echo "$vcdiff" | sed -e 's/.vcdiff$/.current.sha256sum/')
+    new_sum_file=$(echo "$vcdiff" | sed -e 's/.vcdiff$/.new.sha256sum/')
+    output_layer=$(echo "$vcdiff" | sed -e 's/.vcdiff$//')
+    current_sum=$(cat "${current_sum_file}")
+    new_sum=$(cat "${new_sum_file}")
+    # we need to find the corresponding layer in current_image_dir and encode the
+    # delta in new_image_dir, in the directory we must also find by layer.tar sum
+    current_layer=$(find_layer_by_sum "${current_sum}" "${current_image_dir}")
+    if test "$current_layer" = ""; then
+        echo "ERROR: cant find current layer by checksum: ${current_sum}"
+        return 1
+    fi
+    $XDELTA3_CMD "$current_layer" "${vcdiff}" "${output_layer}"
+    # we could here verify the sums here, a bit redundant.
+    rm -f "${current_sum_file}" "${new_sum_file}" "${vcdiff}"
+}
+
+# given current and new image directories and the binary delta of a layer
+# apply and save the layer.tar in the new image dir
+apply_layer_delta_oci() {
+    local current_image_dir="$1"
+    local new_image_dir="$2"
+    local vcdiff="$3"
+    local current_file
+    local new_sum_file
+
+    current_file=$(echo "$vcdiff" | sed -e 's/\.vcdiff$//')
+    current_file=$(cat "$current_file".source)
+    current_file="${current_image_dir}/$current_file"
+    new_file=$(echo "$vcdiff" | sed -e 's/\.vcdiff$//')
+    $XDELTA3_CMD "$current_file" "${vcdiff}" "${new_file}"
+}
+
+#|-- ecaa1158057a2e325f72c5e43c9847fbef370da5a65d6534b1708c99feb7c0e7
+#|   |-- VERSION
+#|   |-- json
+#|   |-- layer.tar.current.sha256sum
+#|   |-- layer.tar.new.sha256sum
+#|   `-- layer.tar.vcdiff
+resolve_deep_delta() {
+    local application_name="$1"
+    local input_file="$2"
+    local current_url="$3"
+    local new_image_dir="${TEMP_DIR}"
+    local current_image_dir="${TEMP_DIR}"
+    local current_image_file
+    local vcdiff
+    local image_dir="${TEMP_DIR}"
+
+    current_image_file="${image_dir}"/$(echo "${current_url}" | sha256sum | cut -f1 -d' ')
+    if test -f "$current_image_file"; then
+        rm -f "${current_image_file}"
+    fi
+    container_image_save "${application_name}" "$current_url" "${current_image_file}"
+    new_image_dir="${image_dir}/image-$(sha256sum "${input_file}" | cut -f1 -d' ')"
+    current_image_dir="${image_dir}/image-$(sha256sum "${current_image_file}" | cut -f1 -d' ')"
+    unpack_image "${input_file}" "${new_image_dir}"
+    unpack_image "${current_image_file}" "${current_image_dir}"
+
+    if test -f "${new_image_dir}"/oci-layout; then
+        if test ! -f "${current_image_dir}"/oci-layout; then
+            echo "ERROR: current image is not in OCI format while the new one is, cant continue with deep delta."
+            return 1
+        fi
+
+        for vcdiff in "${new_image_dir}"/*/*/*.vcdiff; do # FIXME: this is not the way files should be scanned -- change to find and temp file (remember /bin/sh compatibility);
+            if test ! -f "$vcdiff"; then
+                break
+            fi
+            apply_layer_delta_oci "${current_image_dir}" "${new_image_dir}" "${vcdiff}"
+        done
+    else
+        if test -f "${current_image_dir}"/oci-layout; then
+            echo "ERROR: current image is in OCI format while the new one is not, cant continue with deep delta."
+            return 1
+        fi
+
+        for vcdiff in "${new_image_dir}"/*/layer.tar.vcdiff; do # FIXME: this is not the way files should be scanned -- change to find and temp file (remember /bin/sh compatibility);
+            if test ! -f "$vcdiff"; then
+                break
+            fi
+            apply_layer_delta "${current_image_dir}" "${new_image_dir}" "${vcdiff}"
+        done
+    fi
+    rm -f "${input_file}"
+    tar cf "${input_file}" -C "${new_image_dir}" .
+}
+
+container_image_load() {
+    local application_name="$1"
+    local url="$2"
+    local input_file="$3"
+    local url_current="$4"
+    local deep_delta="$5"
+
+    if test "$deep_delta" = "true"; then
+        resolve_deep_delta "${application_name}" "${input_file}" "${url_current}"
+    fi
+    $DOCKER_CMD image load < "$input_file"
+}
+
+comp_stop() {
+    local application_name="$1"
+    local manifests_dir="$2"
+
+    $DOCKER_COMPOSE_CMD \
+        --project-directory "$manifests_dir" \
+        --project-name "$application_name" \
+        down >> "$manifests_dir"/compose.log 2>&1
+}
+
+comp_start() {
+    local application_name="$1"
+    local manifests_dir="$2"
+    local rc=0
+
+    $DOCKER_COMPOSE_CMD \
+        --project-directory "$manifests_dir" \
+        --project-name "$application_name" \
+        up -d --wait --remove-orphans > "$manifests_dir"/compose.log 2>&1
+    rc="$?"
+    if test "$rc" != "0"; then
+        echo "Failed to start composition, logs follow:" 1>&2
+        cat "$manifests_dir/compose.log" 1>&2
+        docker_compose_cmd \
+            --project-directory "$manifests_dir" \
+            --project-name "$application_name" \
+            logs -t 1>&2
+        return $rc
+    fi
+    return 0
+}
+
+clean_up() {
+    local app_dir="$1"
+
+    if test -f "$app_dir"/images/urls; then
+        xargs $DOCKER_CMD image rm < "$app_dir"/images/urls
+    fi
+}
+
+comp_rollback() {
+    local -r application_name="$1"
+    local -r manifests_dir="$2"
+    local -r rollback_dir="$3"
+
+    echo "rolling back ${application_name} to ${roolback_id}"
+    comp_stop "${application_name}" "${manifests_dir}" || return 1
+    comp_start "${application_name}" "${rollback_dir}"
+}
+
+handle_artifact() {
+    local image_dir
+    local image
+    local url_new
+    local url_current
+    local sha_new
+    local sha_current
+    local image_current
+    local image_new
+    local deep_delta
+    local rollback_id="last"
+    local rc=0
+
+    if test ! -d "$TEMP_DIR"; then
+        echo "ERROR: $TEMP_DIR does not exist"
+        return 1
+    fi
+
+    echo "decompressing images"
+    $TAR_CMD -xzf "$1"/images.tar.gz -C "$TEMP_DIR"
+    echo "decompressing manifests"
+    $TAR_CMD -xzf "$1"/manifests.tar.gz -C "$TEMP_DIR"
+
+    echo "unpacking images"
+    for image_dir in "${TEMP_DIR}/images/"*; do
+        echo "unpacking $image_dir"
+        url_new=$(cat "${image_dir}/url-new.txt")
+        url_current=$(cat "${image_dir}/url-current.txt")
+        sha_new=$(cat "${image_dir}/sums-new.txt")
+        sha_current=$(cat "${image_dir}/sums-current.txt")
+        if test "$url_new" = ""; then
+            echo "ERROR: payload ${image_dir}/url-new.txt cannot be empty"
+            return 1
+        fi
+        if test "$sha_new" = ""; then
+            echo "ERROR: sha_new cannot be empty"
+            return 1
+        fi
+
+        if test "$url_new" != "$url_current"; then
+            if test "$url_current" = ""; then
+                echo "ERROR: url_current cannot be empty"
+                return 1
+            fi
+            if test "$sha_current" = ""; then
+                echo "ERROR: sha_ccurrent cannot be empty"
+                return 1
+            fi
+            if test ! -f "${image_dir}/deep_delta"; then
+                # deep-delta means that the binary delta was generated at the layers level,
+                # and the orchestrators submodule will deal with decoding during the LOAD below
+                # ref. to LOAD implementations
+                image_current="${TEMP_DIR}/current.${sha_current}.img"
+                image_new="${TEMP_DIR}/new.${sha_new}.img"
+                container_image_save "${application_name}" "$url_current" "$image_current"
+                $delta_cmd "$image_current" "${image_dir}/image.img" "${image_new}"
+                mv -v "${image_new}" "${image_dir}/image.img"
+            fi
+        fi
+    done
+    if test -d "${PERSISTENT_STORE}/${application_name}"; then
+        echo "copying existing composition to -previous"
+        rm -Rf "${PERSISTENT_STORE}/${application_name}-previous"
+        mv -v "${PERSISTENT_STORE}/${application_name}" "${PERSISTENT_STORE}/${application_name}-previous"
+    else
+        echo "no previous composition found"
+    fi
+    mkdir -pv "${PERSISTENT_STORE}/${application_name}"/images
+    rm -vf "${PERSISTENT_STORE}/${application_name}"/images/*
+    for image_dir in "${TEMP_DIR}/images/"*; do
+        echo "scanning ${image_dir}"
+        url_current=$(cat "${image_dir}/url-current.txt")
+        url_new=$(cat "${image_dir}/url-new.txt")
+        sha_new=$(cat "${image_dir}/sums-new.txt")
+        deep_delta="false"
+        if test -f "${image_dir}/deep_delta"; then
+            deep_delta="true"
+        fi
+        container_image_load "${application_name}" "${url_new}" "${image_dir}/image.img" "${url_current}" "${deep_delta}"
+        # and the sub module deals with proper image loading
+        # we save the image urls and shasums in order to be able to clean up
+        echo "${url_new}" >> "${PERSISTENT_STORE}/${application_name}"/images/urls
+        echo "${sha_new}" >> "${PERSISTENT_STORE}/${application_name}"/images/shas
+    done
+    # we should check if the app is healthy and alive, then decide what to do
+    # at the moment we assume it is alive and ok
+    if test -d "${PERSISTENT_STORE}/${application_name}-previous/manifests"; then
+        echo "stopping ${PERSISTENT_STORE}/${application_name}-previous/manifests"
+        comp_stop "${application_name}" "${PERSISTENT_STORE}/${application_name}-previous/manifests"
+    else
+        echo "-previous composition not present; nothing to stop."
+    fi
+    mv -v "$TEMP_DIR/manifests" "${PERSISTENT_STORE}/${application_name}/"
+    echo "starting ${PERSISTENT_STORE}/${application_name}/manifests"
+    set +e
+    comp_start "${application_name}" "${PERSISTENT_STORE}/${application_name}/manifests" 2>&1
+    if test $? -eq 0; then
+        echo "successfully started"
+        if test -d "${PERSISTENT_STORE}/${application_name}-${rollback_id}"; then
+            echo "cleaning up -${rollback_id}"
+            clean_up "${PERSISTENT_STORE}/${application_name}-${rollback_id}" # clean up call automatically removes the images in by reference taken from clen-up subdirectory, it relies on the fact that we save them there
+            echo "cleaning up -previous"
+            clean_up "${PERSISTENT_STORE}/${application_name}-previous" # clean up the composition that was running just now
+        else
+            echo "successful rollout: nothing to clean"
+        fi
+        rm -Rfv "${PERSISTENT_STORE}/${application_name}-previous"
+        # save_rollback "${PERSISTENT_STORE}/${application_name}-${rollback_id}" # saves the current images ids and manifests as new rollback state. this can be just cp -a "${PERSISTENT_STORE}/${application_name} "${PERSISTENT_STORE}/${application_name}-${rollback_id}"
+        echo "saving data for rollback"
+        rm -Rfv "${PERSISTENT_STORE}/${application_name}-${rollback_id}"
+        cp -va "${PERSISTENT_STORE}/${application_name}" "${PERSISTENT_STORE}/${application_name}-${rollback_id}"
+        echo "successfully saved rollback data"
+    else
+        echo "unsuccessful start"
+        rc=8
+        clean_up "${PERSISTENT_STORE}/${application_name}"
+        comp_rollback "${application_name}" "${PERSISTENT_STORE}/${application_name}/manifests" "${PERSISTENT_STORE}/${application_name}-${rollback_id}"
+        if test $? -eq 0; then
+            echo "successful rollback"
+            rc=80
+        else
+            echo "unsuccessful rollback trying to start the composition we saw when we started"
+            comp_start "${application_name}" "${PERSISTENT_STORE}/${application_name}-previous/manifests"
+            if test $? -eq 0; then
+                echo "successfully rolled out ${PERSISTENT_STORE}/${application_name}-previous"
+                rc=82
+            else
+                echo "rollout of ${PERSISTENT_STORE}/${application_name}-previous was unsuccessful; deployment failed; rollout attempts failed."
+                rc=84
+            fi
+        fi
+    fi
+    set -e
+    return $rc
+}
+
+case "$STATE" in
+    NeedsArtifactReboot)
+        echo "No"
+        ;;
+
+    SupportsRollback)
+        echo "No" # switch to Yes on MEN-6077
+        ;;
+
+    ArtifactInstall)
+        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
+        assert_requirements
+        handle_artifact "$FILES"/files
+        ;;
+
+    ArtifactRollback)
+        true
+        ;;
+esac
