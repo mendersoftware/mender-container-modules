@@ -18,7 +18,6 @@ FILES="$2"
 TEMP_DIR="$FILES"/tmp
 
 TAR_CMD="tar"
-DELTA_CMD="xdelta3"
 
 PERSISTENT_STORE="/data/mender-docker-compose"
 
@@ -40,7 +39,6 @@ if test -d "$PERSISTENT_STORE"; then
 fi
 
 assert_requirements() {
-    # TODO: xdelta3, sha256sum
     if ! "$TAR_CMD" --version < /dev/null > /dev/null 2>&1; then
         echo "ERROR: $TAR_CMD is required. Exiting."
         return 1
@@ -81,136 +79,6 @@ parse_metadata() {
     fi
 }
 
-unpack_image() {
-    local input_file="$1"
-    local image_dir="$2"
-
-    if test -d "${image_dir}"; then
-        rm -Rf "${image_dir}"
-    fi
-    mkdir -p "${image_dir}"
-    tar xvf "$input_file" -C "${image_dir}"
-}
-
-# given a checksum and a directory find matching layer.tar
-# be careful what you echo to stdout from this function:
-# it prints the path to a layer
-find_layer_by_sum() {
-    local sum="$1"
-    local dir="$2"
-    local file_list
-
-    if test "$sum" = ""; then
-        return 1
-    fi
-    file_list=$(mktemp)
-    find "$dir" -name layer.tar -exec sha256sum {} \; > "${file_list}"
-    cat "$file_list" | sed -ne "/^${sum}/s/^${sum}[ ]*//p"
-    rm -f "${file_list}"
-}
-
-# given current and new image directories and the binary delta of a layer
-# apply and save the layer.tar in the new image dir
-apply_layer_delta() {
-    local current_image_dir="$1"
-    local new_image_dir="$2"
-    local vcdiff="$3"
-    local current_sum_file
-    local new_sum_file
-    local current_sum
-    local new_sum
-    local output_layer
-    local current_layer_tar
-    local new_layer_tar
-
-    current_sum_file=$(echo "$vcdiff" | sed -e 's/.vcdiff$/.current.sha256sum/')
-    new_sum_file=$(echo "$vcdiff" | sed -e 's/.vcdiff$/.new.sha256sum/')
-    output_layer=$(echo "$vcdiff" | sed -e 's/.vcdiff$//')
-    current_sum=$(cat "${current_sum_file}")
-    new_sum=$(cat "${new_sum_file}")
-    # we need to find the corresponding layer in current_image_dir and encode the
-    # delta in new_image_dir, in the directory we must also find by layer.tar sum
-    current_layer=$(find_layer_by_sum "${current_sum}" "${current_image_dir}")
-    if test "$current_layer" = ""; then
-        echo "ERROR: cant find current layer by checksum: ${current_sum}"
-        return 1
-    fi
-    $DELTA_CMD "$current_layer" "${vcdiff}" "${output_layer}"
-    # we could here verify the sums here, a bit redundant.
-    rm -f "${current_sum_file}" "${new_sum_file}" "${vcdiff}"
-}
-
-# given current and new image directories and the binary delta of a layer
-# apply and save the layer.tar in the new image dir
-apply_layer_delta_oci() {
-    local current_image_dir="$1"
-    local new_image_dir="$2"
-    local vcdiff="$3"
-    local current_file
-    local new_sum_file
-
-    current_file=$(echo "$vcdiff" | sed -e 's/\.vcdiff$//')
-    current_file=$(cat "$current_file".source)
-    current_file="${current_image_dir}/$current_file"
-    new_file=$(echo "$vcdiff" | sed -e 's/\.vcdiff$//')
-    $DELTA_CMD "$current_file" "${vcdiff}" "${new_file}"
-}
-
-#|-- ecaa1158057a2e325f72c5e43c9847fbef370da5a65d6534b1708c99feb7c0e7
-#|   |-- VERSION
-#|   |-- json
-#|   |-- layer.tar.current.sha256sum
-#|   |-- layer.tar.new.sha256sum
-#|   `-- layer.tar.vcdiff
-resolve_deep_delta() {
-    local application_name="$1"
-    local input_file="$2"
-    local current_url="$3"
-    local new_image_dir="${TEMP_DIR}"
-    local current_image_dir="${TEMP_DIR}"
-    local current_image_file
-    local vcdiff
-    local image_dir="${TEMP_DIR}"
-
-    current_image_file="${image_dir}"/$(echo "${current_url}" | sha256sum | cut -f1 -d' ')
-    if test -f "$current_image_file"; then
-        rm -f "${current_image_file}"
-    fi
-    container_image_save "${application_name}" "$current_url" "${current_image_file}"
-    new_image_dir="${image_dir}/image-$(sha256sum "${input_file}" | cut -f1 -d' ')"
-    current_image_dir="${image_dir}/image-$(sha256sum "${current_image_file}" | cut -f1 -d' ')"
-    unpack_image "${input_file}" "${new_image_dir}"
-    unpack_image "${current_image_file}" "${current_image_dir}"
-
-    if test -f "${new_image_dir}"/oci-layout; then
-        if test ! -f "${current_image_dir}"/oci-layout; then
-            echo "ERROR: current image is not in OCI format while the new one is, cant continue with deep delta."
-            return 1
-        fi
-
-        for vcdiff in "${new_image_dir}"/*/*/*.vcdiff; do # FIXME: this is not the way files should be scanned -- change to find and temp file (remember /bin/sh compatibility);
-            if test ! -f "$vcdiff"; then
-                break
-            fi
-            apply_layer_delta_oci "${current_image_dir}" "${new_image_dir}" "${vcdiff}"
-        done
-    else
-        if test -f "${current_image_dir}"/oci-layout; then
-            echo "ERROR: current image is in OCI format while the new one is not, cant continue with deep delta."
-            return 1
-        fi
-
-        for vcdiff in "${new_image_dir}"/*/layer.tar.vcdiff; do # FIXME: this is not the way files should be scanned -- change to find and temp file (remember /bin/sh compatibility);
-            if test ! -f "$vcdiff"; then
-                break
-            fi
-            apply_layer_delta "${current_image_dir}" "${new_image_dir}" "${vcdiff}"
-        done
-    fi
-    rm -f "${input_file}"
-    tar cf "${input_file}" -C "${new_image_dir}" .
-}
-
 handle_artifact() {
     local image_dir
     local image
@@ -218,9 +86,6 @@ handle_artifact() {
     local url_current
     local sha_new
     local sha_current
-    local image_current
-    local image_new
-    local deep_delta
     local rollback_id="last"
     local rc=0
 
@@ -259,16 +124,6 @@ handle_artifact() {
                 echo "ERROR: sha_ccurrent cannot be empty"
                 return 1
             fi
-            if test ! -f "${image_dir}/deep_delta"; then
-                # deep-delta means that the binary delta was generated at the layers level,
-                # and the orchestrators submodule will deal with decoding during the LOAD below
-                # ref. to LOAD implementations
-                image_current="${TEMP_DIR}/current.${sha_current}.img"
-                image_new="${TEMP_DIR}/new.${sha_new}.img"
-                container_image_save "${application_name}" "$url_current" "$image_current"
-                $delta_cmd "$image_current" "${image_dir}/image.img" "${image_new}"
-                mv -v "${image_new}" "${image_dir}/image.img"
-            fi
         fi
     done
     if test -d "${PERSISTENT_STORE}/${application_name}"; then
@@ -285,11 +140,7 @@ handle_artifact() {
         url_current=$(cat "${image_dir}/url-current.txt")
         url_new=$(cat "${image_dir}/url-new.txt")
         sha_new=$(cat "${image_dir}/sums-new.txt")
-        deep_delta="false"
-        if test -f "${image_dir}/deep_delta"; then
-            deep_delta="true"
-        fi
-        container_image_load "${application_name}" "${url_new}" "${image_dir}/image.img" "${url_current}" "${deep_delta}"
+        container_image_load "${application_name}" "${url_new}" "${image_dir}/image.img" "${url_current}"
         # and the sub module deals with proper image loading
         # we save the image urls and shasums in order to be able to clean up
         echo "${url_new}" >> "${PERSISTENT_STORE}/${application_name}"/images/urls

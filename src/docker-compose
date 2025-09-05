@@ -83,11 +83,7 @@ container_image_load() {
     local url="$2"
     local input_file="$3"
     local url_current="$4"
-    local deep_delta="$5"
 
-    if test "$deep_delta" = "true"; then
-        resolve_deep_delta "${application_name}" "${input_file}" "${url_current}"
-    fi
     $DOCKER_CMD image load < "$input_file"
 }
 
