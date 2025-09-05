@@ -21,13 +21,13 @@ TAR_CMD="tar"
 
 PERSISTENT_STORE="/data/mender-docker-compose"
 
-cleanup() {
+persistent_store_cleanup() {
     set +e
     if test -f "$PERSISTENT_STORE"/.rw_test; then
         rm -f "$PERSISTENT_STORE"/.rw_test
     fi
 }
-trap cleanup 1 2 3 6 15
+trap persistent_store_cleanup 1 2 3 6 15
 
 if test -d "$PERSISTENT_STORE"; then
     if touch "$PERSISTENT_STORE"/.rw_test; then
