@@ -140,7 +140,7 @@ handle_artifact() {
         url_current=$(cat "${image_dir}/url-current.txt")
         url_new=$(cat "${image_dir}/url-new.txt")
         sha_new=$(cat "${image_dir}/sums-new.txt")
-        container_image_load "${application_name}" "${url_new}" "${image_dir}/image.img" "${url_current}"
+        container_image_load "${url_new}" "${image_dir}/image.img"
         # and the sub module deals with proper image loading
         # we save the image urls and shasums in order to be able to clean up
         echo "${url_new}" >> "${PERSISTENT_STORE}/${application_name}"/images/urls
