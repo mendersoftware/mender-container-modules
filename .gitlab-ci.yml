@@ -1,0 +1,14 @@
+stages:
+  - test
+
+include:
+  - component: gitlab.com/Northern.tech/Mender/mendertesting/commit-lint@master
+  - project: 'Northern.tech/Mender/mendertesting'
+    file:
+      - '.gitlab-ci-check-license.yml'
+      - '.gitlab-ci-github-status-updates.yml'
+      - '.gitlab-ci-check-shell-format.yml'
+
+test:check-shell-formatting:
+  before_script:
+    - SHELL_SCRIPTS="src/docker-compose"
