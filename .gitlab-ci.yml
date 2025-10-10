@@ -11,4 +11,4 @@ include:
 
 test:check-shell-formatting:
   before_script:
-    - SHELL_SCRIPTS="src/docker-compose"
+    - SHELL_SCRIPTS="src/docker-compose src/gen_docker-compose"
