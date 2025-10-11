@@ -27,7 +27,12 @@ TAR_CMD="tar"
 DOCKER_CMD="docker"
 DOCKER_COMPOSE_CMD=""
 
-CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
+# Allow overriding the config file path, primarily for tests.
+if [ -n "$MENDER_DOCKER_COMPOSE_CONFIG_FILE" ]; then
+    CONFIG_FILE="$MENDER_DOCKER_COMPOSE_CONFIG_FILE"
+else
+    CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
+fi
 PERSISTENT_STORE="/data/mender-docker-compose"
 
 if test -f "$CONFIG_FILE"; then
