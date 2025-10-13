@@ -435,9 +435,9 @@ docker image load
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
+docker-compose --project-name test-comp down
 docker image load
 docker images --format {{json .ID}} some/lighttpd:latest
-docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up -d
 docker rmi bad/php:oldest
 EOF
@@ -553,9 +553,9 @@ docker image load
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
+docker-compose --project-name test-comp down
 docker image load
 docker images --format {{json .ID}} bad/php:worst
-docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up -d
 docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up -d
@@ -885,6 +885,7 @@ docker image load
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
+docker-compose --project-name test-comp down
 docker image load
 docker image load
 docker images --format {{json .ID}} some/lighttpd:best

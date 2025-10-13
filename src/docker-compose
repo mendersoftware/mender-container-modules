@@ -187,12 +187,29 @@ install_artifact() {
     local artifact_files="$1"
     local rc=0
 
+    echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
+
+    if test -d "${PERSISTENT_STORE}/current"; then
+        echo "saving existing composition as -previous"
+        rm -rf "${PERSISTENT_STORE}/previous" # should not be there, but just in case
+        mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/previous"
+    else
+        echo "no previous composition found"
+    fi
+
+    # If the previous version is present, we need to make sure it's stopped.
+    # XXX: let docker compose figure this out?
+    if test -d "${PERSISTENT_STORE}/previous"; then
+        comp_stop "${PERSISTENT_STORE}/previous"
+    else
+        echo "previous composition not present; nothing to stop."
+    fi
+
     if test ! -d "$TEMP_DIR"; then
         echo "ERROR: $TEMP_DIR does not exist"
         return 1
     fi
 
-    echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
     echo "extracting images"
     $TAR_CMD -xzf "${artifact_files}/images.tar.gz" -C "$TEMP_DIR"
     echo "extracting manifests"
@@ -217,22 +234,6 @@ install_artifact() {
     done
     if [ $rc -ne 0 ]; then
         return $rc
-    fi
-
-    if test -d "${PERSISTENT_STORE}/current"; then
-        echo "saving existing composition as -previous"
-        rm -rf "${PERSISTENT_STORE}/previous" # should not be there, but just in case
-        mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/previous"
-    else
-        echo "no previous composition found"
-    fi
-
-    # If the previous version is present, we need to make sure it's stopped.
-    # XXX: let docker compose figure this out?
-    if test -d "${PERSISTENT_STORE}/previous"; then
-        comp_stop "${PERSISTENT_STORE}/previous"
-    else
-        echo "previous composition not present; nothing to stop."
     fi
 
     comp_start "${PERSISTENT_STORE}/new" 2>&1
