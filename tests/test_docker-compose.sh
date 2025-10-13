@@ -759,6 +759,163 @@ EOF
 }
 tests+=(test_artifact_install_up_fail_rollback_cleanup)
 
+test_two_artifacts_install_commit_install_load_fail_rollback_cleanup() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # For this test, we need 'docker images...' to return something consistent
+    # between runs that we can easily refer to.
+    cat << EOF > "${WORKDIR}/bin/docker"
+case "\$1" in
+     --version|version)
+        exit 0
+        ;;
+     compose)
+        exit 1
+        ;;
+     images)
+        # return the queried image reference as its ID
+        echo "\$4"
+        ;;
+esac
+echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+exit 0
+EOF
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+    "${SRCDIR}/docker-compose" ArtifactCommit "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First ArtifactCommit failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    # Now we need to change the file tree to be a new artifact
+    rm -rf "${WORKDIR}/artifact-file-tree/tmp/"*
+    cat << EOF > "${WORKDIR}/artifact-file-tree/header/header-info"
+{
+  "artifact_provides": { "artifact_name": "test-artifact2" }
+}
+EOF
+
+    cat << EOF > "${WORKDIR}/manifests/docker-compose.yml"
+services:
+  lighttpd:
+    image: some/lighttpd:best
+    ports:
+      - "8081:80"
+  php:
+    image: bad/php:worst
+EOF
+    tar -C "${WORKDIR}" -cf "${WORKDIR}/artifact-file-tree/files/manifests.tar" manifests
+
+    # We also need a 'docker load' failure, ideally for the second image which
+    # is the more tricky case.
+    cat << EOF > "${WORKDIR}/bin/docker"
+#!/bin/bash
+case "\$1" in
+     --version|version)
+        exit 0
+        ;;
+     compose)
+        exit 1
+        ;;
+     images)
+        if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done" ]; then
+            echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+            exit 1
+        else
+            touch "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done"
+            echo "\$4"
+        fi
+        ;;
+     image) # docker image load < /some/img.tar
+        if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_load_done" ]; then
+            echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+            exit 1
+        else
+            touch "${WORKDIR}/artifact-file-tree/tmp/first_load_done"
+        fi
+        ;;
+esac
+echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+exit 0
+EOF
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 2 ]; then
+        echo "Second ArtifactInstall didn't fail as expected, logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return 1
+    fi
+    rc=0
+
+    "${SRCDIR}/docker-compose" ArtifactRollback "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactRollback failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Second Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
+docker image load
+docker image load
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} bad/php:oldest
+docker-compose --project-name test-comp up -d
+docker image load
+docker image load
+docker images --format {{json .ID}} some/lighttpd:best
+docker images --format {{json .ID}} bad/php:worst
+docker-compose --project-name test-comp down
+docker-compose --project-name test-comp up -d
+docker rmi some/lighttpd:best
+EOF
+    if [ $rc -ne 0 ]; then
+        echo "Unexpected commands executed (see the above diff), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if [ -d "${PERSISTENT_DIR}/new" ]; then
+        echo "'new' directory exists after rollback"
+        return 1
+    fi
+    if ! [ -d "${PERSISTENT_DIR}/current" ]; then
+        echo "'current' directory doesn't exist after rollback"
+        return 1
+    fi
+    if [ -d "${PERSISTENT_DIR}/cleanup" ]; then
+        echo "'cleanup' directory exists after rollback"
+        return 1
+    fi
+
+    return $rc
+}
+tests+=(test_two_artifacts_install_commit_install_load_fail_rollback_cleanup)
+
 n_ok=0
 n_fail=0
 for ((i = 0; i < ${#tests[@]}; i++)); do
