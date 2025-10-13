@@ -12,3 +12,11 @@ include:
 test:check-shell-formatting:
   before_script:
     - SHELL_SCRIPTS="src/docker-compose src/gen_docker-compose tests/test_docker-compose.sh"
+
+test:unit-tests:
+  image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/debian:13
+  before_script:
+    - apt-get update
+    - apt-get -yyq install bash jq tar gzip
+  script:
+    - tests/test_docker-compose.sh
