@@ -267,7 +267,11 @@ rollback_artifact() {
     if [ -d "${PERSISTENT_STORE}/previous" ]; then
         mv -v "${PERSISTENT_STORE}/previous" "${PERSISTENT_STORE}/current"
         comp_start "${PERSISTENT_STORE}/current" 2>&1
+    else
+        echo "No previous composition to roll back to"
     fi
+
+    return 0
 }
 
 cleanup() {
