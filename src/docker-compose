@@ -27,7 +27,12 @@ TAR_CMD="tar"
 DOCKER_CMD="docker"
 DOCKER_COMPOSE_CMD=""
 
-CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
+# Allow overriding the config file path, primarily for tests.
+if [ -n "$MENDER_DOCKER_COMPOSE_CONFIG_FILE" ]; then
+    CONFIG_FILE="$MENDER_DOCKER_COMPOSE_CONFIG_FILE"
+else
+    CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
+fi
 PERSISTENT_STORE="/data/mender-docker-compose"
 
 if test -f "$CONFIG_FILE"; then
@@ -108,7 +113,7 @@ parse_metadata() {
 container_image_load() {
     local input_file="$1"
 
-    $DOCKER_CMD image load < "$input_file"
+    $DOCKER_CMD image load --input "$input_file"
 }
 
 comp_stop() {
@@ -182,12 +187,29 @@ install_artifact() {
     local artifact_files="$1"
     local rc=0
 
+    echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
+
+    if test -d "${PERSISTENT_STORE}/current"; then
+        echo "saving existing composition as -previous"
+        rm -rf "${PERSISTENT_STORE}/previous" # should not be there, but just in case
+        mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/previous"
+    else
+        echo "no previous composition found"
+    fi
+
+    # If the previous version is present, we need to make sure it's stopped.
+    # XXX: let docker compose figure this out?
+    if test -d "${PERSISTENT_STORE}/previous"; then
+        comp_stop "${PERSISTENT_STORE}/previous"
+    else
+        echo "previous composition not present; nothing to stop."
+    fi
+
     if test ! -d "$TEMP_DIR"; then
         echo "ERROR: $TEMP_DIR does not exist"
         return 1
     fi
 
-    echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
     echo "extracting images"
     $TAR_CMD -xzf "${artifact_files}/images.tar.gz" -C "$TEMP_DIR"
     echo "extracting manifests"
@@ -212,22 +234,6 @@ install_artifact() {
     done
     if [ $rc -ne 0 ]; then
         return $rc
-    fi
-
-    if test -d "${PERSISTENT_STORE}/current"; then
-        echo "saving existing composition as -previous"
-        rm -rf "${PERSISTENT_STORE}/previous" # should not be there, but just in case
-        mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/previous"
-    else
-        echo "no previous composition found"
-    fi
-
-    # If the previous version is present, we need to make sure it's stopped.
-    # XXX: let docker compose figure this out?
-    if test -d "${PERSISTENT_STORE}/previous"; then
-        comp_stop "${PERSISTENT_STORE}/previous"
-    else
-        echo "previous composition not present; nothing to stop."
     fi
 
     comp_start "${PERSISTENT_STORE}/new" 2>&1
@@ -267,7 +273,11 @@ rollback_artifact() {
     if [ -d "${PERSISTENT_STORE}/previous" ]; then
         mv -v "${PERSISTENT_STORE}/previous" "${PERSISTENT_STORE}/current"
         comp_start "${PERSISTENT_STORE}/current" 2>&1
+    else
+        echo "No previous composition to roll back to"
     fi
+
+    return 0
 }
 
 cleanup() {
