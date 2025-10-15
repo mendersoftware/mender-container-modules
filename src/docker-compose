@@ -113,7 +113,7 @@ parse_metadata() {
 container_image_load() {
     local input_file="$1"
 
-    $DOCKER_CMD image load < "$input_file"
+    $DOCKER_CMD image load --input "$input_file"
 }
 
 comp_stop() {

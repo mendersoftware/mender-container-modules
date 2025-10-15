@@ -156,8 +156,8 @@ test_artifact_install() {
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
@@ -202,8 +202,8 @@ test_artifact_install_commit() {
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
@@ -252,8 +252,8 @@ test_artifact_install_rollback() {
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
@@ -312,8 +312,8 @@ test_artifact_install_rollback_cleanup() {
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
@@ -430,13 +430,13 @@ EOF
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
 docker-compose --project-name test-comp down
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker-compose --project-name test-comp up -d
 docker rmi bad/php:oldest
@@ -548,13 +548,13 @@ EOF
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
 docker-compose --project-name test-comp down
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp up -d
 docker-compose --project-name test-comp down
@@ -611,7 +611,7 @@ case "\$1" in
             cat /proc/sys/kernel/random/uuid
         fi
         ;;
-     image) # docker image load < /some/img.tar
+     image) # docker image load --input /some/img.tar
         if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_load_done" ]; then
             echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
             exit 1
@@ -648,8 +648,8 @@ EOF
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp down
@@ -726,8 +726,8 @@ EOF
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
@@ -844,7 +844,7 @@ case "\$1" in
             echo "\$4"
         fi
         ;;
-     image) # docker image load < /some/img.tar
+     image) # docker image load --input /some/img.tar
         if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_load_done" ]; then
             echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
             exit 1
@@ -880,14 +880,14 @@ EOF
     fi
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up -d
 docker-compose --project-name test-comp down
-docker image load
-docker image load
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:best
 docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp down
