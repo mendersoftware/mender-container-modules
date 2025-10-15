@@ -15,6 +15,8 @@ test:check-shell-formatting:
 
 test:unit-tests:
   image: ${CI_DEPENDENCY_PROXY_DIRECT_GROUP_IMAGE_PREFIX}/debian:13
+  tags:
+    - oslo-xps
   before_script:
     - apt-get update
     - apt-get -yyq install bash jq tar gzip
