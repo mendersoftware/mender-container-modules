@@ -23,15 +23,17 @@ Simple tool to generate Mender Artifacts suitable for the docker-compose module
 
 Usage: $0 [options] [-- [options-for-mender-artifact] ]
 
-    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
+    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -i|--architecture -a|--list-architectures -l|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
 
-        --artifact-name     - Artifact name
-        --device-type       - Target device type identification (can be given more than once)
-        --output-path       - Path to output artifact file. Default: docker-compose-artifact.mender
-        --images-dir        - Directory containing container images the composition needs
-        --manifests-dir     - Directory containing docker compose manifests
-        --project-name      - Name of the docker compose project, must contain only characters from the class $PROJECT_NAME_ALLOWED_REGEX
-        --help              - Show help and exit
+        --artifact-name      - Artifact name
+        --device-type        - Target device type identification (can be given more than once)
+        --output-path        - Path to output artifact file. Default: docker-compose-artifact.mender
+        --list-architectures - List the available architectures of the images in the manifests
+        --architecture       - The architecture to download the images for. See --list-architectures for available architectures.
+        --images-dir         - Directory containing container images the composition needs
+        --manifests-dir      - Directory containing docker compose manifests
+        --project-name       - Name of the docker compose project, must contain only characters from the class $PROJECT_NAME_ALLOWED_REGEX
+        --help               - Show help and exit
 
 Anything after a '--' gets passed directly to the mender-artifact tool. See
 'mender-artifact write module-image --help' for details. You may want to
@@ -57,6 +59,11 @@ if ! check_dependency mender-artifact; then
     exit 1
 fi
 
+if ! check_dependency skopeo; then
+    echo "Please follow the instructions here to install skopeo and then try again: https://github.com/containers/skopeo" >&2
+    exit 1
+fi
+
 declare -a device_types
 artifact_name=""
 output_path="docker-compose-artifact.mender"
@@ -65,6 +72,8 @@ passthrough_args=""
 version="1.0"
 manifests_dir=""
 images_dir=""
+architecture=""
+list_architectures=false
 
 if [ $# -eq 0 ]; then
     show_help_and_exit_error
@@ -118,6 +127,17 @@ while test $# -gt 0; do
             output_path=$2
             shift 2
             ;;
+        --list-architectures | -l)
+            list_architectures=true
+            shift 1
+            ;;
+        --architecture | -a)
+            if [ -z "$2" ]; then
+                show_help_and_exit_error
+            fi
+            architecture=$2
+            shift 2
+            ;;
         -h | --help)
             show_help
             exit 0
@@ -137,16 +157,6 @@ while test $# -gt 0; do
     esac
 done
 
-if [ -z "${artifact_name}" ]; then
-    echo "Artifact name not specified. Aborting." >&2
-    show_help_and_exit_error
-fi
-
-if [ -z "${device_types}" ]; then
-    echo "Device type not specified. Aborting." >&2
-    show_help_and_exit_error
-fi
-
 if [ -z "${manifests_dir}" ]; then
     echo "Directory containing manifests not specified. Aborting." >&2
     show_help_and_exit_error
@@ -158,14 +168,32 @@ elif [ $(ls -1 "${manifests_dir}" | wc -l) -eq 0 ]; then
     show_help_and_exit_error
 fi
 
-if [ -z "${images_dir}" ]; then
-    echo "Directory containing images not specified. Aborting." >&2
+images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "${manifests_dir}"/*)
+if [ -z "${images}" ]; then
+    echo "No images found in manifests. Aborting." >&2
     show_help_and_exit_error
-elif ! [ -d "${images_dir}" ]; then
-    echo "Images directory '${images_dir}' doesn't exist. Aborting." >&2
+fi
+
+# if true, list and exit - listing architectures only require manifests dir
+if [ "$list_architectures" = true ]; then
+    for image in $images; do
+        archs=$(skopeo inspect --raw docker://"$image" 2> /dev/null | jq -r '([.manifests[]? | select(.platform.os == "linux") | .platform.architecture] | unique | join(","))' 2> /dev/null)
+        if [ -z "$archs" ]; then
+            # not a multi-arch image
+            archs=$(skopeo inspect docker://"$image" 2> /dev/null | jq -r '.Architecture' 2> /dev/null)
+        fi
+        echo "$image: $archs"
+    done
+    exit 0
+fi
+
+if [ -z "${artifact_name}" ]; then
+    echo "Artifact name not specified. Aborting." >&2
     show_help_and_exit_error
-elif [ $(ls -1 "${images_dir}" | wc -l) -eq 0 ]; then
-    echo "Images directory '${images_dir}' needs to contain at least one image. Aborting." >&2
+fi
+
+if [ -z "${device_types}" ]; then
+    echo "Device type not specified. Aborting." >&2
     show_help_and_exit_error
 fi
 
@@ -184,8 +212,27 @@ function cleanup() {
 }
 trap cleanup EXIT SIGQUIT SIGTERM
 
+mkdir $temp_dir/images
+if [ -z "${images_dir}" ]; then
+    for image in $images; do
+        file_name=$(echo "$image" | tr '/:@' '_')
+        echo "Downloading image: $image"
+        if ! skopeo copy ${architecture:+--override-arch "$architecture"} docker://"$image" docker-archive:"$temp_dir/images/${file_name}.tar":"$image"; then
+            echo "ERROR: Failed to download image: $image" >&2
+            exit 1
+        fi
+    done
+elif ! [ -d "${images_dir}" ]; then
+    echo "Images directory '${images_dir}' doesn't exist. Aborting." >&2
+    show_help_and_exit_error
+elif [ $(ls -1 "${images_dir}" | wc -l) -eq 0 ]; then
+    echo "Images directory '${images_dir}' needs to contain at least one image. Aborting." >&2
+    show_help_and_exit_error
+else
+    cp -r "$images_dir" "${temp_dir}/images"
+fi
+
 cp -r "$manifests_dir" "${temp_dir}/manifests"
-cp -r "$images_dir" "${temp_dir}/images"
 
 tar -C "${temp_dir}" -cf "${temp_dir}/manifests.tar" manifests
 tar -C "${temp_dir}" -czf "${temp_dir}/images.tar.gz" images
