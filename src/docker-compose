@@ -248,7 +248,7 @@ commit_artifact() {
 
 rollback_artifact() {
     echo "Rolling back docker-compose artifact ${ARTIFACT_NAME}"
-    if ! test -d "${PERSISTENT_STORE}/new"; then
+    if [ ! -d "${PERSISTENT_STORE}/new" ] && [ ! -d "${PERSISTENT_STORE}/previous" ]; then
         if test -d "${PERSISTENT_STORE}/current"; then
             # This may seem weird (and it is!), but rollback can be requested even
             # after a commit. In that case we rollback from the committed version to
@@ -266,9 +266,11 @@ rollback_artifact() {
         fi
     fi
 
-    # Stopping may fail in case starting failed which we don't know.
-    comp_stop "${PERSISTENT_STORE}/new" || true
-    mv -v "${PERSISTENT_STORE}/new" "${PERSISTENT_STORE}/cleanup"
+    if [ -d "${PERSISTENT_STORE}/new" ]; then
+        # Stopping may fail in case starting failed which we don't know.
+        comp_stop "${PERSISTENT_STORE}/new" || true
+        mv -v "${PERSISTENT_STORE}/new" "${PERSISTENT_STORE}/cleanup"
+    fi
 
     if [ -d "${PERSISTENT_STORE}/previous" ]; then
         mv -v "${PERSISTENT_STORE}/previous" "${PERSISTENT_STORE}/current"
