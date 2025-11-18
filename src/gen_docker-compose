@@ -212,8 +212,8 @@ function cleanup() {
 }
 trap cleanup EXIT SIGQUIT SIGTERM
 
-mkdir $temp_dir/images
 if [ -z "${images_dir}" ]; then
+    mkdir $temp_dir/images
     for image in $images; do
         file_name=$(echo "$image" | tr '/:@' '_')
         echo "Downloading image: $image"
