@@ -23,7 +23,7 @@ Simple tool to generate Mender Artifacts suitable for the docker-compose module
 
 Usage: $0 [options] [-- [options-for-mender-artifact] ]
 
-    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -i|--architecture -a|--list-architectures -l|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
+    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
 
         --artifact-name      - Artifact name
         --device-type        - Target device type identification (can be given more than once)
