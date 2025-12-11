@@ -27,6 +27,9 @@ TAR_CMD="tar"
 DOCKER_CMD="docker"
 DOCKER_COMPOSE_CMD=""
 
+# Can be overriden by mender-docker-compose.conf
+WAIT_TIMEOUT=120
+
 # Allow overriding the config file path, primarily for tests.
 if [ -n "$MENDER_DOCKER_COMPOSE_CONFIG_FILE" ]; then
     CONFIG_FILE="$MENDER_DOCKER_COMPOSE_CONFIG_FILE"
@@ -154,7 +157,7 @@ comp_start() {
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
-            up --detach > ../compose.log 2>&1
+            up --detach --wait --wait-timeout $WAIT_TIMEOUT > ../compose.log 2>&1
     ) || rc=$?
     if test "$rc" -ne 0; then
         echo "Failed to start composition, logs follow:" 1>&2
