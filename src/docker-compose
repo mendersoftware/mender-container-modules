@@ -154,7 +154,7 @@ comp_start() {
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
-            up -d > ../compose.log 2>&1
+            up --detach > ../compose.log 2>&1
     ) || rc=$?
     if test "$rc" -ne 0; then
         echo "Failed to start composition, logs follow:" 1>&2
