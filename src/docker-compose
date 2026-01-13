@@ -147,6 +147,33 @@ comp_stop() {
     return 0
 }
 
+# For docker compose 2.0 and onwards you can use `--wait` and `--wait-timeout`
+# In order to not break backwards compatibility we use our own
+# logic to check if the containers started by a composition are healthy
+wait_healthy() {
+    local project_name="$1"
+    local timeout="$WAIT_TIMEOUT"
+    local states
+
+    while [ "$timeout" -gt 0 ]; do
+        local container_ids=$($DOCKER_COMPOSE_CMD --project-name "$project_name" ps --quiet)
+        if [ -n "$container_ids" ]; then
+            states=$($DOCKER_CMD inspect --format '{{.State.Status}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}no_check{{end}}' $container_ids 2> /dev/null)
+            local not_ready_count=$(echo "$states" | grep -v -E "^running:(healthy|no_check)$" | wc -l)
+            if [ "$not_ready_count" -eq 0 ]; then
+                return 0
+            fi
+        fi
+        sleep 1
+        timeout=$((timeout - 1))
+    done
+
+    echo "Timeout reached. Some containers are not healthy/running." 1>&2
+    echo "Container states at timeout:" 1>&2
+    echo "$states" 1>&2
+    return 1
+}
+
 comp_start() {
     local manifests_dir="$1/manifests"
     local project_name=$(cat "$1/project_name")
@@ -157,8 +184,13 @@ comp_start() {
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
-            up --detach --wait --wait-timeout $WAIT_TIMEOUT > ../compose.log 2>&1
+            up --detach > ../compose.log 2>&1
     ) || rc=$?
+
+    if test "$rc" -eq 0; then
+        wait_healthy "$project_name" || rc=$?
+    fi
+
     if test "$rc" -ne 0; then
         echo "Failed to start composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
@@ -168,9 +200,8 @@ comp_start() {
                 --project-name "$project_name" \
                 logs 1>&2
         )
-        return $rc
     fi
-    return 0
+    return "$rc"
 }
 
 get_manifest_image_ids() {

@@ -31,10 +31,15 @@ mkdir -p "$PERSISTENT_DIR"
 
 CMDLINE_LOGGER_LOG_FILE="${WORKDIR}/cmdline.log"
 
+# The max timeout for a docker composition to be healhty
+# Set in MENDER_DOCKER_COMPOSE_CONFIG_FILE
+WAIT_TIMEOUT=2
+
 prepare_config() {
     MENDER_DOCKER_COMPOSE_CONFIG_FILE="${WORKDIR}/mender-docker-compose.conf"
     cat << EOF > "$MENDER_DOCKER_COMPOSE_CONFIG_FILE"
 PERSISTENT_STORE=${PERSISTENT_DIR}
+WAIT_TIMEOUT=${WAIT_TIMEOUT}
 EOF
     export MENDER_DOCKER_COMPOSE_CONFIG_FILE
 }
@@ -84,6 +89,13 @@ case "\$1" in
      --version|version)
         exit 0
         ;;
+     --project-name)
+        if [ "\$3" = "ps" ] && [ "\$4" = "--quiet" ]; then
+            echo "fake-container-id-1"
+            echo "fake-container-id-2"
+            exit 0
+        fi
+        ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
 exit 0
@@ -106,6 +118,13 @@ case "\$1" in
         ;;
      images)
         cat /proc/sys/kernel/random/uuid
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
         ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -160,7 +179,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -206,7 +225,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -256,7 +275,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 EOF
     if [ $rc -ne 0 ]; then
@@ -316,7 +335,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker rmi $image_id1
 docker rmi $image_id2
@@ -364,6 +383,13 @@ case "\$1" in
      images)
         # return the queried image reference as its ID
         echo "\$4"
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
         ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -434,11 +460,11 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} some/lighttpd:latest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker rmi bad/php:oldest
 EOF
     if [ $rc -ne 0 ]; then
@@ -484,6 +510,13 @@ case "\$1" in
      images)
         # return the queried image reference as its ID
         echo "\$4"
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
         ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -552,13 +585,13 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} bad/php:worst
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker rmi bad/php:worst
 EOF
     if [ $rc -ne 0 ]; then
@@ -618,6 +651,13 @@ case "\$1" in
         else
             touch "${WORKDIR}/artifact-file-tree/tmp/first_load_done"
         fi
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
         ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -692,6 +732,13 @@ case "\$1" in
      --version|version)
         exit 0
         ;;
+     --project-name)
+        if [ "\$3" = "ps" ] && [ "\$4" = "--quiet" ]; then
+            echo "fake-container-id-1"
+            echo "fake-container-id-2"
+            exit 0
+        fi
+        ;;
 esac
 if [ \$3 = "up" ]; then
    echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -730,7 +777,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp logs
 docker-compose --project-name test-comp down
 docker rmi $image_id1
@@ -779,6 +826,13 @@ case "\$1" in
      images)
         # return the queried image reference as its ID
         echo "\$4"
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
         ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -852,6 +906,13 @@ case "\$1" in
             touch "${WORKDIR}/artifact-file-tree/tmp/first_load_done"
         fi
         ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
+        ;;
 esac
 echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
 exit 0
@@ -884,14 +945,14 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:best
 docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp down
-docker-compose --project-name test-comp up --detach --wait --wait-timeout 120
+docker-compose --project-name test-comp up --detach
 docker rmi some/lighttpd:best
 EOF
     if [ $rc -ne 0 ]; then
@@ -992,6 +1053,84 @@ EOF
     return $rc
 }
 tests+=(test_rollback_with_previous_no_new)
+
+test_wait_healthy_timeout() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # Override the inspect state to return containers stuck in starting state
+    sed -i 's/echo "running:no_check"/echo "running:starting"/' "${WORKDIR}/bin/docker"
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -eq 0 ]; then
+        echo "ArtifactInstall should have failed with timeout"
+        return 1
+    fi
+
+    if ! grep -q "Timeout reached" "${WORKDIR}/docker-compose.log"; then
+        echo "Expected timeout error message not found in logs"
+        cat "${WORKDIR}/docker-compose.log"
+        return 1
+    fi
+
+    return 0
+}
+tests+=(test_wait_healthy_timeout)
+
+test_wait_healthy_unhealthy() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # Override the inspect state to return unhealthy containers
+    sed -i 's/echo "running:no_check"/echo "running:unhealthy"/' "${WORKDIR}/bin/docker"
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -eq 0 ]; then
+        echo "ArtifactInstall should have failed with unhealthy container"
+        return 1
+    fi
+
+    if ! grep -q "Timeout reached" "${WORKDIR}/docker-compose.log"; then
+        echo "Expected timeout error message not found in logs"
+        cat "${WORKDIR}/docker-compose.log"
+        return 1
+    fi
+
+    return 0
+}
+tests+=(test_wait_healthy_unhealthy)
+
+test_wait_healthy_exited() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # Override the inspect state to return exited container
+    sed -i 's/echo "running:no_check"/echo "exited:no_check"/' "${WORKDIR}/bin/docker"
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -eq 0 ]; then
+        echo "ArtifactInstall should have failed with exited container"
+        return 1
+    fi
+
+    if ! grep -q "Timeout reached" "${WORKDIR}/docker-compose.log"; then
+        echo "Expected timeout error message not found in logs"
+        cat "${WORKDIR}/docker-compose.log"
+        return 1
+    fi
+
+    return 0
+}
+tests+=(test_wait_healthy_exited)
 
 n_ok=0
 n_fail=0
