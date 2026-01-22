@@ -23,7 +23,7 @@ Simple tool to generate Mender Artifacts suitable for the docker-compose module
 
 Usage: $0 [options] [-- [options-for-mender-artifact] ]
 
-    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
+    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -s|--skip-images -m|--manifests-dir -h|--help -p|--project-name]
 
         --artifact-name      - Artifact name
         --device-type        - Target device type identification (can be given more than once)
@@ -31,6 +31,7 @@ Usage: $0 [options] [-- [options-for-mender-artifact] ]
         --list-architectures - List the available architectures of the images in the manifests
         --architecture       - The architecture to download the images for. See --list-architectures for available architectures.
         --images-dir         - Directory containing container images the composition needs
+        --skip-images        - Skip adding images to the artifact and include only the manifests
         --manifests-dir      - Directory containing docker compose manifests
         --project-name       - Name of the docker compose project, must contain only characters from the class $PROJECT_NAME_ALLOWED_REGEX
         --help               - Show help and exit
@@ -66,6 +67,7 @@ fi
 
 declare -a device_types
 declare -a passthrough_args
+declare -a artifact_files
 artifact_name=""
 output_path="docker-compose-artifact.mender"
 project_name=""
@@ -74,6 +76,7 @@ manifests_dir=""
 images_dir=""
 architecture=""
 list_architectures=false
+skip_images=false
 
 if [ $# -eq 0 ]; then
     show_help_and_exit_error
@@ -91,6 +94,10 @@ while test $# -gt 0; do
                 show_help_and_exit_error
             fi
             shift 2
+            ;;
+        --skip-images | -s)
+            skip_images=true
+            shift 1
             ;;
         --manifests-dir | -m)
             if [ -z "$2" ]; then
@@ -212,7 +219,7 @@ function cleanup() {
 }
 trap cleanup EXIT SIGQUIT SIGTERM
 
-if [ -z "${images_dir}" ]; then
+if [ -z "${images_dir}" ] && [ "$skip_images" = false ]; then
     mkdir $temp_dir/images
     for image in $images; do
         file_name=$(echo "$image" | tr '/:@' '_')
@@ -222,20 +229,24 @@ if [ -z "${images_dir}" ]; then
             exit 1
         fi
     done
-elif ! [ -d "${images_dir}" ]; then
+elif ! [ -d "${images_dir}" ] && [ "$skip_images" = false ]; then
     echo "Images directory '${images_dir}' doesn't exist. Aborting." >&2
     show_help_and_exit_error
-elif [ $(ls -1 "${images_dir}" | wc -l) -eq 0 ]; then
+elif [ $(ls -1 "${images_dir}" | wc -l) -eq 0 ] && [ "$skip_images" = false ]; then
     echo "Images directory '${images_dir}' needs to contain at least one image. Aborting." >&2
     show_help_and_exit_error
-else
+elif [ "$skip_images" = false ]; then
     cp -r "$images_dir" "${temp_dir}/images"
 fi
 
 cp -r "$manifests_dir" "${temp_dir}/manifests"
 
 tar -C "${temp_dir}" -cf "${temp_dir}/manifests.tar" manifests
-tar -C "${temp_dir}" -czf "${temp_dir}/images.tar.gz" images
+artifact_files+=(-f "${temp_dir}/manifests.tar")
+if [ "$skip_images" = false ]; then
+    tar -C "${temp_dir}" -czf "${temp_dir}/images.tar.gz" images
+    artifact_files+=(-f "${temp_dir}/images.tar.gz")
+fi
 cat << EOF > "${temp_dir}/meta.json"
 {"version": "1", "project_name": "$project_name"}
 EOF
@@ -256,7 +267,7 @@ mender-artifact write module-image \
     --compression none \
     --artifact-name "${artifact_name}" \
     "${device_types[@]}" \
-    -f "${temp_dir}/images.tar.gz" -f "${temp_dir}/manifests.tar" \
+    "${artifact_files[@]}" \
     --meta-data "${temp_dir}/meta.json" \
     --output-path "${output_path}" \
     --software-name "${software_name}" \

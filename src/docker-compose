@@ -119,6 +119,25 @@ container_image_load() {
     $DOCKER_CMD image load --input "$input_file"
 }
 
+container_image_pull() {
+    local manifests_dir="$1/manifests"
+    local project_name=$(cat "$1/project_name")
+    local rc=0
+
+    echo "Pulling images for $1 from registry"
+    (
+        cd "$manifests_dir"
+        $DOCKER_COMPOSE_CMD \
+            --project-name "$project_name" \
+            pull
+    ) || rc=$?
+
+    if test "$rc" -ne 0; then
+        echo "Failed to pull images from registry" 1>&2
+    fi
+    return "$rc"
+}
+
 comp_stop() {
     local manifests_dir="$1/manifests"
     local project_name=$(cat "$1/project_name")
@@ -219,6 +238,7 @@ get_manifest_image_ids() {
 
 install_artifact() {
     local artifact_files="$1"
+    local has_images=true
     local rc=0
 
     echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
@@ -244,8 +264,13 @@ install_artifact() {
         return 1
     fi
 
-    echo "extracting images"
-    $TAR_CMD -xzf "${artifact_files}/images.tar.gz" -C "$TEMP_DIR"
+    if test ! -f "${artifact_files}/images.tar.gz"; then
+        echo "Images not bundled in artifact, pulling them from the registry"
+        has_images=false
+    else
+        echo "extracting images"
+        $TAR_CMD -xzf "${artifact_files}/images.tar.gz" -C "$TEMP_DIR"
+    fi
     echo "extracting manifests"
     $TAR_CMD -xf "${artifact_files}/manifests.tar" -C "$TEMP_DIR"
 
@@ -253,15 +278,21 @@ install_artifact() {
     cp -r "${TEMP_DIR}/manifests" "${PERSISTENT_STORE}/new/"
     echo "${PROJECT_NAME}" > "${PERSISTENT_STORE}/new/project_name"
 
-    local image
-    for image in "${TEMP_DIR}/images/"*; do
-        if ! container_image_load "$image"; then
-            # Make sure to gather the IDs of loaded images below for cleanup.
+    if [ "$has_images" = true ]; then
+        local image
+        for image in "${TEMP_DIR}/images/"*; do
+            if ! container_image_load "$image"; then
+                rc=2
+                break
+            fi
+        done
+    else
+        if ! container_image_pull "${PERSISTENT_STORE}/new"; then
             rc=2
-            break
         fi
-    done
+    fi
 
+    # Gather image IDs for cleanup later
     local manifest
     for manifest in "${PERSISTENT_STORE}/new/manifests/"*; do
         get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/new/image_ids"
@@ -323,6 +354,7 @@ cleanup() {
         return 0
     fi
 
+    # only remove images that are not used by current
     local image_id
     while read -r image_id; do
         if ! grep -qF "$image_id" "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null; then

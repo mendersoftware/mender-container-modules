@@ -200,6 +200,47 @@ EOF
 }
 tests+=(test_artifact_install)
 
+test_artifact_install_pull_images() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    rm -f "${WORKDIR}/artifact-file-tree/files/images.tar.gz"
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
+docker-compose --project-name test-comp pull
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} bad/php:oldest
+docker-compose --project-name test-comp up --detach
+EOF
+    if [ $rc -ne 0 ]; then
+        echo "Unexpected commands executed (see the above diff), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if ! [ -f "${PERSISTENT_DIR}/new/manifests/docker-compose.yml" ]; then
+        echo "New composition doesn't exist at the expected location"
+        return 1
+    fi
+    if ! [ -f "${PERSISTENT_DIR}/new/image_ids" ]; then
+        echo "Image IDs file doesn't exist at the expected location"
+        return 1
+    fi
+
+    return $rc
+}
+tests+=(test_artifact_install_pull_images)
+
 test_artifact_install_commit() {
     local rc=0
 
