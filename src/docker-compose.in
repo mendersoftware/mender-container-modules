@@ -1,0 +1,109 @@
+#!/bin/sh
+# -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
+# Copyright 2026 Northern.tech AS
+#
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+#
+#        http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
+
+m4_dnl This is shell code with m4 commands/macros which requires preprocessing with
+m4_dnl m4 to produce a working script.
+m4_dnl
+m4_dnl Use --prefix-builtins when running m4 (include() becomes m4_include(),...) to
+m4_dnl avoid unintentional interpretation of builtin m4 macros in the code and
+m4_dnl comments.
+m4_dnl
+m4_dnl Make sure m4 does not interpret single quotes and back-ticks
+m4_changequote()
+m4_dnl
+# Uncomment the line below to get a very verbose output from this Update Module.
+# set -x
+
+set -e
+
+STATE="$1"
+FILES="$2"
+TEMP_DIR="$FILES"/tmp
+
+# Can be overriden by mender-docker-compose.conf
+WAIT_TIMEOUT=120
+
+m4_include(docker-compose_base.sh)
+
+# Allow overriding the config file path, primarily for tests.
+if [ -n "$MENDER_DOCKER_COMPOSE_CONFIG_FILE" ]; then
+    CONFIG_FILE="$MENDER_DOCKER_COMPOSE_CONFIG_FILE"
+else
+    CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
+fi
+PERSISTENT_STORE="/data/mender-docker-compose"
+
+if test -f "$CONFIG_FILE"; then
+    . "$CONFIG_FILE"
+fi
+
+discover_requirements() {
+    discover_base_requirements
+}
+
+extract_images_from_artifact() {
+    local artifact_files="$1"
+
+    echo "extracting images"
+    $TAR_CMD -xzf "${artifact_files}/images.tar.gz" -C "$TEMP_DIR"
+}
+
+install_artifact() {
+    local artifact_files="$1"
+    local rc=0
+
+    echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
+    install_composition_from_artifact "$artifact_files"
+}
+
+rollback_artifact() {
+    echo "Rolling back docker-compose artifact ${ARTIFACT_NAME}"
+    rollback_composition_from_artifact
+}
+
+case "$STATE" in
+    NeedsArtifactReboot)
+        echo "No"
+        ;;
+
+    SupportsRollback)
+        echo "Yes"
+        ;;
+
+    ArtifactInstall)
+        discover_requirements
+        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
+        install_artifact "$FILES"/files
+        ;;
+
+    ArtifactCommit)
+        discover_requirements
+        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
+        commit_artifact
+        ;;
+
+    ArtifactRollback)
+        discover_requirements
+        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
+        rollback_artifact
+        ;;
+
+    Cleanup)
+        discover_requirements
+        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
+        cleanup
+        ;;
+esac

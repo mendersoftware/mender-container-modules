@@ -1,6 +1,9 @@
 stages:
   - test
 
+variables:
+  LICENSE_HEADERS_IGNORE_FILES_REGEXP: '.*src/docker-compose_base\.sh'
+
 include:
   - component: gitlab.com/Northern.tech/Mender/mendertesting/commit-lint@master
   - project: 'Northern.tech/Mender/mendertesting'
@@ -13,6 +16,8 @@ include:
 
 test:check-shell-formatting:
   before_script:
+    - apk add --no-cache m4 make
+    - make build
     - SHELL_SCRIPTS="src/docker-compose src/gen_docker-compose tests/test_docker-compose.sh"
 
 test:unit-tests:
@@ -21,6 +26,7 @@ test:unit-tests:
     - oslo-xps
   before_script:
     - apt-get update
-    - apt-get -yyq install bash jq tar gzip
+    - apt-get -yyq install bash jq tar gzip m4 make
   script:
+    - make build
     - tests/test_docker-compose.sh
