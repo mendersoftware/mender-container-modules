@@ -1,46 +1,22 @@
-#!/bin/sh
-# Copyright 2025 Northern.tech AS
-#
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
-
-# Uncomment the line below to get a very verbose output from this Update Module.
-# set -x
-
-set -e
-
-STATE="$1"
-FILES="$2"
-TEMP_DIR="$FILES"/tmp
+m4_dnl -*- mode: sh; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
+m4_dnl # Copyright 2026 Northern.tech AS
+m4_dnl #
+m4_dnl #    Licensed under the Apache License, Version 2.0 (the "License");
+m4_dnl #    you may not use this file except in compliance with the License.
+m4_dnl #    You may obtain a copy of the License at
+m4_dnl #
+m4_dnl #        http://www.apache.org/licenses/LICENSE-2.0
+m4_dnl #
+m4_dnl #    Unless required by applicable law or agreed to in writing, software
+m4_dnl #    distributed under the License is distributed on an "AS IS" BASIS,
+m4_dnl #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+m4_dnl #    See the License for the specific language governing permissions and
+m4_dnl #    limitations under the License.
 
 JQ_CMD="jq"
 TAR_CMD="tar"
 DOCKER_CMD="docker"
 DOCKER_COMPOSE_CMD=""
-
-# Can be overriden by mender-docker-compose.conf
-WAIT_TIMEOUT=120
-
-# Allow overriding the config file path, primarily for tests.
-if [ -n "$MENDER_DOCKER_COMPOSE_CONFIG_FILE" ]; then
-    CONFIG_FILE="$MENDER_DOCKER_COMPOSE_CONFIG_FILE"
-else
-    CONFIG_FILE="/etc/mender/mender-docker-compose.conf"
-fi
-PERSISTENT_STORE="/data/mender-docker-compose"
-
-if test -f "$CONFIG_FILE"; then
-    . "$CONFIG_FILE"
-fi
 
 discover_docker_compose() {
     local rc=0
@@ -61,7 +37,7 @@ discover_docker_compose() {
     return $rc
 }
 
-discover_requirements() {
+discover_base_requirements() {
     local rc=0
 
     if ! $JQ_CMD --version > /dev/null 2>&1; then
@@ -221,11 +197,9 @@ get_manifest_image_ids() {
     done
 }
 
-install_artifact() {
+install_composition_from_artifact() {
     local artifact_files="$1"
     local rc=0
-
-    echo "Installing docker-compose artifact ${ARTIFACT_NAME}"
 
     if test -d "${PERSISTENT_STORE}/current"; then
         echo "saving existing composition as -previous"
@@ -248,8 +222,8 @@ install_artifact() {
         return 1
     fi
 
-    echo "extracting images"
-    $TAR_CMD -xzf "${artifact_files}/images.tar.gz" -C "$TEMP_DIR"
+    extract_images_from_artifact "$artifact_files"
+
     echo "extracting manifests"
     $TAR_CMD -xf "${artifact_files}/manifests.tar" -C "$TEMP_DIR"
 
@@ -284,8 +258,7 @@ commit_artifact() {
     fi
 }
 
-rollback_artifact() {
-    echo "Rolling back docker-compose artifact ${ARTIFACT_NAME}"
+rollback_composition_from_artifact() {
     if [ ! -d "${PERSISTENT_STORE}/new" ] && [ ! -d "${PERSISTENT_STORE}/previous" ]; then
         if test -d "${PERSISTENT_STORE}/current"; then
             # This may seem weird (and it is!), but rollback can be requested even
@@ -337,37 +310,3 @@ cleanup() {
 
     return $rc
 }
-
-case "$STATE" in
-    NeedsArtifactReboot)
-        echo "No"
-        ;;
-
-    SupportsRollback)
-        echo "Yes"
-        ;;
-
-    ArtifactInstall)
-        discover_requirements
-        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
-        install_artifact "$FILES"/files
-        ;;
-
-    ArtifactCommit)
-        discover_requirements
-        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
-        commit_artifact
-        ;;
-
-    ArtifactRollback)
-        discover_requirements
-        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
-        rollback_artifact
-        ;;
-
-    Cleanup)
-        discover_requirements
-        parse_metadata "$FILES"/header/meta-data "$FILES"/header/header-info
-        cleanup
-        ;;
-esac
