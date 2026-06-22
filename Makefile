@@ -2,10 +2,14 @@ DESTDIR ?= /
 prefix ?= $(DESTDIR)
 moduledir ?= /usr/share/mender/modules/v3
 
-build: src/docker-compose
+build: src/docker-compose src/gen_docker-compose
 
 src/docker-compose: src/docker-compose.in src/docker-compose_base.sh
 	m4 --prefix-builtins --include=src src/docker-compose.in > $@
+	chmod a+x $@
+
+src/gen_docker-compose: src/gen_docker-compose.in src/gen_docker-compose_base.sh
+	m4 --prefix-builtins --include=src src/gen_docker-compose.in > $@
 	chmod a+x $@
 
 # "check" is common in many projects so let's have it as an alias

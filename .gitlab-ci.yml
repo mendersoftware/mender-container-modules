@@ -2,7 +2,11 @@ stages:
   - test
 
 variables:
-  LICENSE_HEADERS_IGNORE_FILES_REGEXP: '.*src/docker-compose_base\.sh'
+  # src/*_base.sh files are included in other files to produce full standalone
+  # shell scripts and while they have a license, we don't want such license to
+  # appear in the resulting shell scripts and the license headers checker is not
+  # smart enough to handle that
+  LICENSE_HEADERS_IGNORE_FILES_REGEXP: '.*src/.*_base\.sh'
 
 include:
   - component: gitlab.com/Northern.tech/Mender/mendertesting/commit-lint@master
