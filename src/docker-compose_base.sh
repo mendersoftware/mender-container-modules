@@ -222,7 +222,10 @@ install_composition_from_artifact() {
         return 1
     fi
 
-    extract_images_from_artifact "$artifact_files"
+    if ! extract_images_from_artifact "$artifact_files"; then
+        echo "ERROR: failed to extra images from artifact"
+        return 1
+    fi
 
     echo "extracting manifests"
     $TAR_CMD -xf "${artifact_files}/manifests.tar" -C "$TEMP_DIR"
