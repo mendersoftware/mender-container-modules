@@ -187,12 +187,16 @@ EOF
         return $rc
     fi
 
-    if ! [ -f "${PERSISTENT_DIR}/new/manifests/docker-compose.yml" ]; then
+    if ! [ -f "${PERSISTENT_DIR}/current/manifests/docker-compose.yml" ]; then
         echo "New composition doesn't exist at the expected location"
         return 1
     fi
-    if ! [ -f "${PERSISTENT_DIR}/new/image_ids" ]; then
+    if ! [ -f "${PERSISTENT_DIR}/current/image_ids" ]; then
         echo "Image IDs file doesn't exist at the expected location"
+        return 1
+    fi
+    if ! [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker doesn't exist after install"
         return 1
     fi
 
@@ -241,8 +245,8 @@ EOF
         echo "Image IDs file doesn't exist at the expected location"
         return 1
     fi
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after commit"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after commit"
         return 1
     fi
 
@@ -284,8 +288,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after rollback and cleanup"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback and cleanup"
         return 1
     fi
     if [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -346,8 +350,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after rollback and cleanup"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback and cleanup"
         return 1
     fi
     if [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -473,8 +477,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after second commit"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after second commit"
         return 1
     fi
     if ! [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -600,8 +604,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after rollback"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback"
         return 1
     fi
     if ! [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -701,8 +705,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after rollback and cleanup"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback and cleanup"
         return 1
     fi
     if [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -789,8 +793,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after rollback and cleanup"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback and cleanup"
         return 1
     fi
     if [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -961,8 +965,8 @@ EOF
         return $rc
     fi
 
-    if [ -d "${PERSISTENT_DIR}/new" ]; then
-        echo "'new' directory exists after rollback"
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback"
         return 1
     fi
     if ! [ -d "${PERSISTENT_DIR}/current" ]; then
@@ -978,7 +982,7 @@ EOF
 }
 tests+=(test_two_artifacts_install_commit_install_load_fail_rollback_cleanup)
 
-test_rollback_with_previous_no_new() {
+test_rollback_with_previous_no_current() {
     local rc=0
 
     prepare_config
@@ -1028,9 +1032,9 @@ EOF
         return $rc
     fi
 
-    # Simulate issue where artifact install fails to create 'new' directory
+    # Simulate issue where artifact install fails to create 'current' directory
     # i.e. there's only 'previous'
-    rm -rf "${PERSISTENT_DIR}/new"
+    rm -rf "${PERSISTENT_DIR}/current"
 
     "${SRCDIR}/docker-compose" ArtifactRollback "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
@@ -1052,7 +1056,7 @@ EOF
 
     return $rc
 }
-tests+=(test_rollback_with_previous_no_new)
+tests+=(test_rollback_with_previous_no_current)
 
 test_wait_healthy_timeout() {
     local rc=0
