@@ -239,6 +239,7 @@ install_composition_from_artifact() {
 
     local manifest
     for manifest in "${PERSISTENT_STORE}/new/manifests/"*; do
+        test -f "$manifest" || continue
         # Always record image_refs for cleanup() to have an accurate list next run
         get_manifest_image_refs "$manifest" >> "${PERSISTENT_STORE}/new/image_refs"
     done
