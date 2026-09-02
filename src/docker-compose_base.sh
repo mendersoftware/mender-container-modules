@@ -230,9 +230,10 @@ install_composition_from_artifact() {
     echo "extracting manifests"
     $TAR_CMD -xf "${artifact_files}/manifests.tar" -C "$TEMP_DIR"
 
-    mkdir -p "${PERSISTENT_STORE}/new"
-    cp -r "${TEMP_DIR}/manifests" "${PERSISTENT_STORE}/new/"
-    echo "${PROJECT_NAME}" > "${PERSISTENT_STORE}/new/project_name"
+    mkdir -p "${PERSISTENT_STORE}/current"
+    cp -r "${TEMP_DIR}/manifests" "${PERSISTENT_STORE}/current/"
+    echo "${PROJECT_NAME}" > "${PERSISTENT_STORE}/current/project_name"
+    touch "${PERSISTENT_STORE}/uncommitted"
 
     local image
     for image in "${TEMP_DIR}/images/"*; do
@@ -244,25 +245,25 @@ install_composition_from_artifact() {
     done
 
     local manifest
-    for manifest in "${PERSISTENT_STORE}/new/manifests/"*; do
-        get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/new/image_ids"
+    for manifest in "${PERSISTENT_STORE}/current/manifests/"*; do
+        get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/current/image_ids"
     done
     if [ $rc -ne 0 ]; then
         return $rc
     fi
 
-    comp_start "${PERSISTENT_STORE}/new" 2>&1
+    comp_start "${PERSISTENT_STORE}/current" 2>&1
 }
 
 commit_artifact() {
-    mv -v "${PERSISTENT_STORE}/new" "${PERSISTENT_STORE}/current"
+    rm -f "${PERSISTENT_STORE}/uncommitted"
     if [ -d "${PERSISTENT_STORE}/previous" ]; then
         mv -v "${PERSISTENT_STORE}/previous" "${PERSISTENT_STORE}/cleanup"
     fi
 }
 
 rollback_composition_from_artifact() {
-    if [ ! -d "${PERSISTENT_STORE}/new" ] && [ ! -d "${PERSISTENT_STORE}/previous" ]; then
+    if [ ! -f "${PERSISTENT_STORE}/uncommitted" ] && [ ! -d "${PERSISTENT_STORE}/previous" ]; then
         if test -d "${PERSISTENT_STORE}/current"; then
             # This may seem weird (and it is!), but rollback can be requested even
             # after a commit. In that case we rollback from the committed version to
@@ -270,7 +271,6 @@ rollback_composition_from_artifact() {
             echo "Rolling back after a Commit"
 
             # Let's set the stage for the rest of this function.
-            mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/new"
             if [ -d "${PERSISTENT_STORE}/cleanup" ]; then
                 mv -v "${PERSISTENT_STORE}/cleanup" "${PERSISTENT_STORE}/previous"
             fi
@@ -280,10 +280,12 @@ rollback_composition_from_artifact() {
         fi
     fi
 
-    if [ -d "${PERSISTENT_STORE}/new" ]; then
+    rm -f "${PERSISTENT_STORE}/uncommitted"
+
+    if [ -d "${PERSISTENT_STORE}/current" ]; then
         # Stopping may fail in case starting failed which we don't know.
-        comp_stop "${PERSISTENT_STORE}/new" || true
-        mv -v "${PERSISTENT_STORE}/new" "${PERSISTENT_STORE}/cleanup"
+        comp_stop "${PERSISTENT_STORE}/current" || true
+        mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/cleanup"
     fi
 
     if [ -d "${PERSISTENT_STORE}/previous" ]; then
