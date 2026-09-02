@@ -245,11 +245,12 @@ EOF
 # We cannot set --software-filesystem because we don't know where docker stores
 # images. The user has to do that themselves (and there is a hint about this in
 # the --help output).
-software_name="mender-docker-compose.${project_name}"
+software_name_prefix="mender-docker-compose."
+software_name="${software_name_prefix}${project_name}"
 
 # There can only be one project handled by the docker-compose Update Module so
 # every new one installed removes any old installed before.
-clears_provides="*mender-docker-compose_*"
+clears_provides="*${software_name_prefix}*"
 
 mender-artifact write module-image \
     --type docker-compose \
