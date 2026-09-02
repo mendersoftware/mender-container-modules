@@ -309,7 +309,7 @@ cleanup() {
         local image_id
         while read -r image_id; do
             if ! grep -qF "$image_id" "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null; then
-                $DOCKER_CMD rmi "$image_id" || rc=1
+                $DOCKER_CMD rmi --force "$image_id" || rc=1
             fi
         done < "${PERSISTENT_STORE}/cleanup/image_ids"
     fi
