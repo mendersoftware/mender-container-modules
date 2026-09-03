@@ -325,8 +325,8 @@ test_artifact_install_rollback_cleanup() {
         return $rc
     fi
 
-    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
-    local image_id2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
+    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids" | awk '{print $2}')
+    local image_id2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_ids" | awk '{print $2}')
     "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
         echo "Cleanup failed (exit code $rc), logs follow:"
@@ -595,6 +595,8 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
+docker tag some/lighttpd:latest some/lighttpd:latest
+docker tag bad/php:oldest bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker rmi --force bad/php:worst
 EOF
@@ -683,7 +685,7 @@ EOF
         return $rc
     fi
 
-    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
+    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids" | awk '{print $2}')
     "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
         echo "Cleanup failed (exit code $rc), logs follow:"
@@ -767,8 +769,8 @@ EOF
         return $rc
     fi
 
-    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
-    local image_id2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
+    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids" | awk '{print $2}')
+    local image_id2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_ids" | awk '{print $2}')
     "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
         echo "Cleanup failed (exit code $rc), logs follow:"
@@ -956,6 +958,8 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:best
 docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp down
+docker tag some/lighttpd:latest some/lighttpd:latest
+docker tag bad/php:oldest bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker rmi --force some/lighttpd:best
 EOF
@@ -1057,6 +1061,88 @@ EOF
     return $rc
 }
 tests+=(test_rollback_with_previous_no_current)
+
+test_rollback_with_old_format_image_ids() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+    "${SRCDIR}/docker-compose" ArtifactCommit "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First ArtifactCommit failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    # Now we need to change the file tree to be a new artifact
+    rm -rf "${WORKDIR}/artifact-file-tree/tmp/"*
+    cat << EOF > "${WORKDIR}/artifact-file-tree/header/header-info"
+{
+  "artifact_provides": { "artifact_name": "test-artifact2" }
+}
+EOF
+
+    cat << EOF > "${WORKDIR}/manifests/docker-compose.yml"
+services:
+  php:
+    image: bad/php:worst
+EOF
+    tar -C "${WORKDIR}" -cf "${WORKDIR}/artifact-file-tree/files/manifests.tar" manifests
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Second ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    # Simulate a 'previous' composition left over from an older version of
+    # this script, which only recorded bare image IDs, without tags.
+    awk '{print $2}' "${PERSISTENT_DIR}/previous/image_ids" > "${PERSISTENT_DIR}/previous/image_ids.tmp"
+    mv "${PERSISTENT_DIR}/previous/image_ids.tmp" "${PERSISTENT_DIR}/previous/image_ids"
+
+    "${SRCDIR}/docker-compose" ArtifactRollback "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactRollback failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if grep -q "^docker tag " "$CMDLINE_LOGGER_LOG_FILE"; then
+        echo "Unexpected 'docker tag' call for a composition with no recorded tags, logs follow:"
+        cat "$CMDLINE_LOGGER_LOG_FILE"
+        return 1
+    fi
+
+    # Simulate the composition just pushed to 'cleanup' also being in the old,
+    # bare-ID-only format.
+    awk '{print $2}' "${PERSISTENT_DIR}/cleanup/image_ids" > "${PERSISTENT_DIR}/cleanup/image_ids.tmp"
+    mv "${PERSISTENT_DIR}/cleanup/image_ids.tmp" "${PERSISTENT_DIR}/cleanup/image_ids"
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if grep -qE "^docker rmi --force[[:space:]]*$" "$CMDLINE_LOGGER_LOG_FILE"; then
+        echo "'docker rmi --force' called with an empty image ID, logs follow:"
+        cat "$CMDLINE_LOGGER_LOG_FILE"
+        return 1
+    fi
+
+    return $rc
+}
+tests+=(test_rollback_with_old_format_image_ids)
 
 test_wait_healthy_timeout() {
     local rc=0
