@@ -341,8 +341,8 @@ docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
-docker rmi $image_id1
-docker rmi $image_id2
+docker rmi --force $image_id1
+docker rmi --force $image_id2
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -469,7 +469,7 @@ docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker-compose --project-name test-comp up --detach
-docker rmi bad/php:oldest
+docker rmi --force bad/php:oldest
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -596,7 +596,7 @@ docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up --detach
-docker rmi bad/php:worst
+docker rmi --force bad/php:worst
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -697,7 +697,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp down
-docker rmi $image_id1
+docker rmi --force $image_id1
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -784,8 +784,8 @@ docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp logs
 docker-compose --project-name test-comp down
-docker rmi $image_id1
-docker rmi $image_id2
+docker rmi --force $image_id1
+docker rmi --force $image_id2
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -957,7 +957,7 @@ docker images --format {{json .ID}} some/lighttpd:best
 docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up --detach
-docker rmi some/lighttpd:best
+docker rmi --force some/lighttpd:best
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
