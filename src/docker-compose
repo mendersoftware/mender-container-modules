@@ -269,6 +269,7 @@ install_artifact() {
 
     local manifest
     for manifest in "${PERSISTENT_STORE}/current/manifests/"*; do
+        test -f "$manifest" || continue
         get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/current/image_ids"
     done
     if [ $rc -ne 0 ]; then
@@ -329,12 +330,14 @@ cleanup() {
         return 0
     fi
 
-    local image_id
-    while read -r image_id; do
-        if ! grep -qF "$image_id" "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null; then
-            $DOCKER_CMD rmi "$image_id" || rc=1
-        fi
-    done < "${PERSISTENT_STORE}/cleanup/image_ids"
+    if test -f "${PERSISTENT_STORE}/cleanup/image_ids"; then
+        local image_id
+        while read -r image_id; do
+            if ! grep -qF "$image_id" "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null; then
+                $DOCKER_CMD rmi --force "$image_id" || rc=1
+            fi
+        done < "${PERSISTENT_STORE}/cleanup/image_ids"
+    fi
     rm -rf "${PERSISTENT_STORE}/cleanup"
 
     return $rc
