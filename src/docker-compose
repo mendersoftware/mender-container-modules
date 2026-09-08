@@ -216,9 +216,34 @@ get_manifest_image_ids() {
     for image in $(grep -E "^\s+image:" "$manifest" | cut -d: -f2-); do
         id=$($DOCKER_CMD images --format "{{json .ID}}" "$image" | head -n1 | tr -d '"')
         if [ -n "$id" ]; then
-            echo "$id"
+            echo "$image $id"
         fi
     done
+}
+
+# Re-applies the tags recorded in a composition's image_ids file to the image
+# IDs they were originally recorded against. This is necessary because loading
+# a newer artifact's images can move a tag (e.g. "myimage:latest") over to the
+# newly loaded image, so the previous composition's tags no longer point at
+# the images it actually needs when we roll back to it.
+retag_composition_images() {
+    local composition_dir="$1"
+    local image_ids_file="${composition_dir}/image_ids"
+
+    if [ ! -f "$image_ids_file" ]; then
+        return 0
+    fi
+
+    local image_ref image_id
+    while read -r image_ref image_id; do
+        # Compositions installed by an older version of this script only
+        # recorded the image ID, without the tag, in this file. Skip those
+        # entries, there's nothing to retag them from.
+        if [ -z "$image_id" ]; then
+            continue
+        fi
+        $DOCKER_CMD tag "$image_id" "$image_ref"
+    done < "$image_ids_file"
 }
 
 install_artifact() {
@@ -315,6 +340,7 @@ rollback_artifact() {
 
     if [ -d "${PERSISTENT_STORE}/previous" ]; then
         mv -v "${PERSISTENT_STORE}/previous" "${PERSISTENT_STORE}/current"
+        retag_composition_images "${PERSISTENT_STORE}/current"
         comp_start "${PERSISTENT_STORE}/current" 2>&1
     else
         echo "No previous composition to roll back to"
@@ -331,9 +357,17 @@ cleanup() {
     fi
 
     if test -f "${PERSISTENT_STORE}/cleanup/image_ids"; then
-        local image_id
-        while read -r image_id; do
-            if ! grep -qF "$image_id" "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null; then
+        local image_ref image_id
+        while read -r image_ref image_id; do
+            # Compositions installed by an older version of this script only
+            # recorded the image ID, without the tag, in this file.
+            if [ -z "$image_id" ]; then
+                image_id="$image_ref"
+            fi
+            # $NF is the last field, i.e. the image ID regardless of whether
+            # the line also has a tag as its first field (new format) or not
+            # (old format).
+            if ! awk '{print $NF}' "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null | grep -qFx "$image_id"; then
                 $DOCKER_CMD rmi --force "$image_id" || rc=1
             fi
         done < "${PERSISTENT_STORE}/cleanup/image_ids"
