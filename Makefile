@@ -1,6 +1,7 @@
 DESTDIR ?= /
 prefix ?= $(DESTDIR)
 moduledir ?= /usr/share/mender/modules/v3
+bindir ?= /usr/bin
 
 build: src/docker-compose src/gen_docker-compose
 
@@ -26,15 +27,27 @@ clean:
 
 install: build install-docker-compose
 
+install-generators: build install-gen_docker-compose
+
 install-docker-compose:
 	install -d -m 755 $(prefix)$(moduledir)
 	install -m 755 src/docker-compose $(prefix)$(moduledir)/
 
+install-gen_docker-compose:
+	install -d -m 755 $(prefix)$(bindir)
+	install -m 755 src/gen_docker-compose $(prefix)$(bindir)/
+
 uninstall: uninstall-docker-compose
+
+uninstall-generators: uninstall-gen_docker-compose
 
 uninstall-docker-compose:
 	rm -f src/docker-compose $(prefix)$(moduledir)/docker-compose
 	-rmdir $(prefix)$(moduledir)
+
+uninstall-gen_docker-compose:
+	rm -f $(prefix)$(bindir)/gen_docker-compose
+	-rmdir $(prefix)$(bindir)
 
 # Tell Make to automatically delete corrupted output files on failure
 .DELETE_ON_ERROR:
@@ -46,5 +59,9 @@ uninstall-docker-compose:
 .PHONY: clean
 .PHONY: install
 .PHONY: install-docker-compose
+.PHONY: install-generators
+.PHONY: install-gen_docker-compose
 .PHONY: uninstall
 .PHONY: uninstall-docker-compose
+.PHONY: uninstall-generators
+.PHONY: uninstall-gen_docker-compose
