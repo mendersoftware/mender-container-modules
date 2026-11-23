@@ -258,6 +258,8 @@ install_composition_from_artifact() {
     mkdir -p "${PERSISTENT_STORE}/current"
     cp -r "${TEMP_DIR}/manifests" "${PERSISTENT_STORE}/current/"
     echo "${PROJECT_NAME}" > "${PERSISTENT_STORE}/current/project_name"
+    # Rollback uses this to tell which Artifact the composition belongs to.
+    echo "${ARTIFACT_NAME}" > "${PERSISTENT_STORE}/current/artifact_name"
     touch "${PERSISTENT_STORE}/uncommitted"
 
     local image
@@ -290,7 +292,21 @@ commit_artifact() {
 
 rollback_composition_from_artifact() {
     if [ ! -f "${PERSISTENT_STORE}/uncommitted" ] && [ ! -d "${PERSISTENT_STORE}/previous" ]; then
-        if test -d "${PERSISTENT_STORE}/current"; then
+        if test -d "${PERSISTENT_STORE}/current" \
+                && [ -f "${PERSISTENT_STORE}/current/artifact_name" ] \
+                && [ "$(cat "${PERSISTENT_STORE}/current/artifact_name")" != "${ARTIFACT_NAME}" ]; then
+            # The installed composition doesn't belong to the Artifact being
+            # rolled back. Either the installation failed before it changed
+            # anything, or an earlier run of this rollback was interrupted
+            # after it restored the previous composition. In both cases the
+            # installed composition is the one to keep, so only make sure it's
+            # running. Compositions installed by older versions of this script
+            # have no artifact_name file and are handled as before.
+            echo "Installed composition belongs to $(cat "${PERSISTENT_STORE}/current/artifact_name"), not ${ARTIFACT_NAME}; nothing to roll back"
+            retag_composition_images "${PERSISTENT_STORE}/current"
+            comp_start "${PERSISTENT_STORE}/current" 2>&1
+            return 0
+        elif test -d "${PERSISTENT_STORE}/current"; then
             # This may seem weird (and it is!), but rollback can be requested even
             # after a commit. In that case we rollback from the committed version to
             # the one pushed for cleanup.
