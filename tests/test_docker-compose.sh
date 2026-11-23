@@ -465,9 +465,9 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} some/lighttpd:latest
+docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up --detach
 docker rmi --force bad/php:oldest
 EOF
@@ -590,9 +590,9 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} bad/php:worst
+docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker tag some/lighttpd:latest some/lighttpd:latest
@@ -952,7 +952,6 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:best
