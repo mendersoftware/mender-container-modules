@@ -179,7 +179,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -229,7 +229,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -279,7 +279,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker-compose --project-name test-comp down
 EOF
     if [ $rc -ne 0 ]; then
@@ -339,7 +339,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker-compose --project-name test-comp down
 docker rmi --force $image_id1
 docker rmi --force $image_id2
@@ -464,11 +464,10 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} some/lighttpd:latest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker rmi --force bad/php:oldest
 EOF
     if [ $rc -ne 0 ]; then
@@ -589,15 +588,13 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker images --format {{json .ID}} bad/php:worst
-docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker tag some/lighttpd:latest some/lighttpd:latest
 docker tag bad/php:oldest bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker rmi --force bad/php:worst
 EOF
     if [ $rc -ne 0 ]; then
@@ -622,6 +619,140 @@ EOF
     return $rc
 }
 tests+=(test_two_artifacts_install_commit_install_rollback_cleanup)
+
+test_two_artifacts_different_projects_install_commit_install_rollback_cleanup() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # For this test, we need 'docker images...' to return something consistent
+    # between runs that we can easily refer to.
+    cat << EOF > "${WORKDIR}/bin/docker"
+case "\$1" in
+     --version|version)
+        exit 0
+        ;;
+     compose)
+        exit 1
+        ;;
+     images)
+        # return the queried image reference as its ID
+        echo "\$4"
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
+        ;;
+esac
+echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+exit 0
+EOF
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+    "${SRCDIR}/docker-compose" ArtifactCommit "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First ArtifactCommit failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "First Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    # Now we need to change the file tree to be a new artifact
+    rm -rf "${WORKDIR}/artifact-file-tree/tmp/"*
+    cat << EOF > "${WORKDIR}/artifact-file-tree/header/header-info"
+{
+  "artifact_provides": { "artifact_name": "test-artifact2" }
+}
+EOF
+    # The new artifact uses a different project name so the previous composition
+    # cannot be updated in place and has to be stopped instead.
+    cat << EOF > "${WORKDIR}/artifact-file-tree/header/meta-data"
+{"version": "1", "project_name": "other-comp"}
+EOF
+
+    rm "${WORKDIR}/images/image2.tar"
+    tar -C "${WORKDIR}" -czf "${WORKDIR}/artifact-file-tree/files/images.tar.gz" images
+    cat << EOF > "${WORKDIR}/manifests/docker-compose.yml"
+services:
+  php:
+    image: bad/php:worst
+EOF
+    tar -C "${WORKDIR}" -cf "${WORKDIR}/artifact-file-tree/files/manifests.tar" manifests
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Second ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+    "${SRCDIR}/docker-compose" ArtifactRollback "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactRollback failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Second Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} bad/php:oldest
+docker-compose --project-name test-comp up --detach --remove-orphans
+docker-compose --project-name test-comp down
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker images --format {{json .ID}} bad/php:worst
+docker-compose --project-name other-comp up --detach --remove-orphans
+docker-compose --project-name other-comp down
+docker tag some/lighttpd:latest some/lighttpd:latest
+docker tag bad/php:oldest bad/php:oldest
+docker-compose --project-name test-comp up --detach --remove-orphans
+docker rmi --force bad/php:worst
+EOF
+    if [ $rc -ne 0 ]; then
+        echo "Unexpected commands executed (see the above diff), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if [ -f "${PERSISTENT_DIR}/uncommitted" ]; then
+        echo "'uncommitted' marker exists after rollback"
+        return 1
+    fi
+    if ! [ -d "${PERSISTENT_DIR}/current" ]; then
+        echo "'current' directory doesn't exist after rollback"
+        return 1
+    fi
+    if [ -d "${PERSISTENT_DIR}/cleanup" ]; then
+        echo "'cleanup' directory exists after rollback"
+        return 1
+    fi
+
+    return $rc
+}
+tests+=(test_two_artifacts_different_projects_install_commit_install_rollback_cleanup)
 
 test_artifact_install_load_fail_rollback_cleanup() {
     local rc=0
@@ -783,7 +914,7 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker-compose --project-name test-comp logs
 docker-compose --project-name test-comp down
 docker rmi --force $image_id1
@@ -951,16 +1082,14 @@ docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:latest
 docker images --format {{json .ID}} bad/php:oldest
-docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/lighttpd:best
 docker images --format {{json .ID}} bad/php:worst
-docker-compose --project-name test-comp down
 docker tag some/lighttpd:latest some/lighttpd:latest
 docker tag bad/php:oldest bad/php:oldest
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker rmi --force some/lighttpd:best
 EOF
     if [ $rc -ne 0 ]; then
@@ -1327,7 +1456,7 @@ test_rollback_install_failed_before_changes() {
     # The running composition is neither stopped nor removed
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker tag some/acq:v1 some/acq:v1
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -1386,11 +1515,10 @@ test_rollback_interrupted_rerun() {
     # The re-run only (re)starts test-artifact's composition and Cleanup
     # removes test-artifact2's image, not test-artifact's
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker-compose --project-name test-comp down
 docker tag some/acq:v1 some/acq:v1
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker tag some/acq:v1 some/acq:v1
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker rmi --force some/acq:v2
 EOF
     if [ $rc -ne 0 ]; then
@@ -1439,14 +1567,12 @@ test_rollback_after_commit() {
     done
 
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
-docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
 docker images --format {{json .ID}} some/acq:v2
-docker-compose --project-name test-comp up --detach
-docker-compose --project-name test-comp down
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker tag some/acq:v1 some/acq:v1
-docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp up --detach --remove-orphans
 docker rmi --force some/acq:v2
 EOF
     if [ $rc -ne 0 ]; then

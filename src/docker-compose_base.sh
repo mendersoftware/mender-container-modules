@@ -164,7 +164,7 @@ comp_start() {
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
-            up --detach > ../compose.log 2>&1
+            up --detach --remove-orphans > ../compose.log 2>&1
     ) || rc=$?
 
     if test "$rc" -eq 0; then
@@ -234,10 +234,16 @@ install_composition_from_artifact() {
         echo "no previous composition found"
     fi
 
-    # If the previous version is present, we need to make sure it's stopped.
-    # XXX: let docker compose figure this out?
+    # If the previous version is present and uses the same project name, it is
+    # updated in place by 'docker compose up' which only recreates the services
+    # that changed. Otherwise, it needs to be stopped because only one project
+    # is handled by this Update Module.
     if test -d "${PERSISTENT_STORE}/previous"; then
-        comp_stop "${PERSISTENT_STORE}/previous"
+        if [ "$(cat "${PERSISTENT_STORE}/previous/project_name")" = "${PROJECT_NAME}" ]; then
+            echo "previous composition has the same project name; updating it in place."
+        else
+            comp_stop "${PERSISTENT_STORE}/previous"
+        fi
     else
         echo "previous composition not present; nothing to stop."
     fi
@@ -325,8 +331,15 @@ rollback_composition_from_artifact() {
     rm -f "${PERSISTENT_STORE}/uncommitted"
 
     if [ -d "${PERSISTENT_STORE}/current" ]; then
-        # Stopping may fail in case starting failed which we don't know.
-        comp_stop "${PERSISTENT_STORE}/current" || true
+        if [ -d "${PERSISTENT_STORE}/previous" ] \
+               && [ "$(cat "${PERSISTENT_STORE}/current/project_name")" = "$(cat "${PERSISTENT_STORE}/previous/project_name")" ]; then
+            # Same project, the previous composition is restored in place
+            # below, only recreating the services that changed.
+            echo "Rolling back $(cat "${PERSISTENT_STORE}/current/project_name") in place"
+        else
+            # Stopping may fail in case starting failed which we don't know.
+            comp_stop "${PERSISTENT_STORE}/current" || true
+        fi
         mv -v "${PERSISTENT_STORE}/current" "${PERSISTENT_STORE}/cleanup"
     fi
 
