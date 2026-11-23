@@ -234,13 +234,11 @@ install_composition_from_artifact() {
         echo "no previous composition found"
     fi
 
-    # If the previous version is present, we need to make sure it's stopped.
-    # XXX: let docker compose figure this out?
-    if test -d "${PERSISTENT_STORE}/previous"; then
-        comp_stop "${PERSISTENT_STORE}/previous"
-    else
-        echo "previous composition not present; nothing to stop."
-    fi
+    # The previous composition is deliberately left running while the new
+    # images are extracted and loaded, which can take minutes on slow
+    # devices. It is only stopped right before the new composition is started
+    # below. Loading images does not affect running containers, even if it
+    # moves their tags to the new images.
 
     if test ! -d "$TEMP_DIR"; then
         echo "ERROR: $TEMP_DIR does not exist"
@@ -276,6 +274,15 @@ install_composition_from_artifact() {
     done
     if [ $rc -ne 0 ]; then
         return $rc
+    fi
+
+    # Only now that everything is ready, stop the previous composition to
+    # keep the downtime as short as possible.
+    # XXX: let docker compose figure this out?
+    if test -d "${PERSISTENT_STORE}/previous"; then
+        comp_stop "${PERSISTENT_STORE}/previous"
+    else
+        echo "previous composition not present; nothing to stop."
     fi
 
     comp_start "${PERSISTENT_STORE}/current" 2>&1
