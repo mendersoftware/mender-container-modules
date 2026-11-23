@@ -29,11 +29,11 @@ install: build install-docker-compose
 
 install-generators: build install-gen_docker-compose
 
-install-docker-compose:
+install-docker-compose: src/docker-compose
 	install -d -m 755 $(prefix)$(moduledir)
 	install -m 755 src/docker-compose $(prefix)$(moduledir)/
 
-install-gen_docker-compose:
+install-gen_docker-compose: src/gen_docker-compose
 	install -d -m 755 $(prefix)$(bindir)
 	install -m 755 src/gen_docker-compose $(prefix)$(bindir)/
 
